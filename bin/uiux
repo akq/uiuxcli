@@ -1,0 +1,213 @@
+#!/usr/bin/env node
+'use strict';
+
+var path = require('path')
+var { runCmd } = require('../src/script/util')
+var Fn = require('../src/script')
+
+var obj = {}, key, service
+var api = ['debug', 'dev']
+var Services = {
+    [api[0]]: ['generalDebug', {
+            base: 1
+            , repo: 1
+            , port: 1
+        }, 'dir' //no --xxx command
+    ]
+    , [api[1]]: ['coreDebug', {
+            repo: 1 
+            , port: 1
+            , pull: 1
+            , branches: 'csv2arr'
+            , start: ['branches', 1]
+            , remote: ['branches', 0]
+        }, 'dir', ['repo', 'branches']
+    ]
+}
+
+function svc(csv){
+    var c = csv.split(',')
+    return [c[0], c[1], c[0] + ' --'+c[1] +' <args>']
+}
+
+function help(status, arg) {
+    var print = (status === 0) ? console.log : console.error
+    var cmd = path.basename(process.argv[1])
+    switch(status){
+        case 1: 
+            print('no valid service availalbe')
+            break
+        case 2: 
+            print('the service is not found: '+ arg)
+            break
+        case 3: 
+            var [s, o, c] = svc(arg)
+            print('the option "--'+o+'" is not found: '+ cmd + ' '+ c)
+            break
+        case 4: 
+            var [ o, c] = svc(arg)
+            print('the args is not found : '+ cmd + ' '+ c)
+            break
+
+
+    }
+    print()
+    print("Usage: " + cmd + " ["+api.join(' | ')+"] [--<options> <args>] [<dir>]")
+    for(var i in Services){
+        print('\tThe avaialbe options for service ' + i)
+        for(var j in Services[i][1]){
+            print('\t\t --'+j+' <args>')
+        }
+    }
+    process.exit(status);
+}
+var cwd = process.cwd()
+var mapper = {
+    repoFn : (remote = 'origin') => {
+        var ret = runCmd(cwd, 'git remote get-url '+remote)
+        if(ret.code){
+            return
+        }
+        else return ret.stdout.trim()
+    }
+    , branchesFn : (remote = 'origin', starter= 'master' ) => {
+        var ret = runCmd(cwd, 'git branch -r')
+        if(ret.code){
+            return [starter]
+        }
+        // var prefix = 'remotes/'+remote
+        var prefix = remote
+        var len = prefix.length +1
+        var out = ret.stdout.trim().split('\n')
+        var list = out.filter(x=>{
+            x = x.trim() 
+            return x.startsWith(prefix) 
+            && ! x.startsWith(prefix + '/HEAD')
+            && x !== prefix + '/main' 
+            && x !== prefix + '/master' 
+            && x !== prefix + '/' + starter
+        }).map(x=>x.trim().substr(len))
+        list.unshift(starter)
+        return list
+    }
+    , currentBranch: ()=>{
+        var ret = runCmd(cwd, 'git branch --show-current')
+        if(ret.code){
+            return 'master'
+        }
+        return ret.stdout.trim()
+    }
+    , currentRemote: () => {
+        var ret = runCmd(cwd, 'git remote')
+        if(ret.code){
+            throw ret.code
+        }
+        var out = ret.stdout.trim().split('\n')
+        return out.includes('origin')?'origin': out[0]
+    }
+    , csv2arr:(str)=>str.split(',')
+}
+var curRemote, repo, curBranch, branches = ['master']
+try{
+    curRemote = mapper.currentRemote()
+}
+catch(e){}
+
+if(curRemote){
+    repo = mapper.repoFn(curRemote)
+    curBranch = mapper.currentBranch()
+    branches = mapper.branchesFn(curRemote, curBranch)
+}
+
+var defaults = {
+    [api[0]]:{
+        dir: cwd
+        , base: path.resolve(cwd, '..')
+        , repo
+        , port: 1234
+    }
+    , [api[1]]:{
+        dir: repo? path.resolve(cwd, '..'): cwd
+        , repo
+        , branches
+        , port: 1234
+    }
+}
+// console.log(__dirname)
+var Invoker = {}
+var curSvc, curKey
+for (var i = 2; i < process.argv.length; ++i) {
+    var arg = process.argv[i];
+    if(!service){
+        if(i > 2) help(1)
+        if(Services[arg]){
+            service = Services[arg]
+            obj = {...defaults[arg]}
+            curSvc = arg
+            continue
+        }
+        else{
+            // service is not found
+            help(2, arg)
+        }
+    }
+    
+    if (key) {
+        if(!arg){
+            help(4, `${curSvc},${curKey}`)
+        }
+        if(Array.isArray(key)){
+            var [fn, index] = key
+            if(!Invoker[fn]) Invoker[fn] = []
+            Invoker[fn][index] = arg
+            if(obj[fn]) obj[fn] = null
+        }
+        else if (typeof key === 'function'){
+            obj[curKey] = key(arg)
+        }
+        else {
+            obj[key] = arg
+        }
+        key = null
+    }
+    else if (arg.substr(0, 2) === '--'){
+        var k = curKey = arg.substr(2)
+        var cmd = service[1][k]
+        if(cmd === 1){
+            key = k
+        }
+        else if(typeof cmd === 'string'){
+            key = mapper[cmd]
+        }
+        else if(Array.isArray(cmd)){
+            key = cmd
+        }
+        else {
+            help(3, `${curSvc},${curKey}`)
+        }
+    }
+    else{
+        if(arg[0] === '.') 
+            arg = path.resolve(cwd, arg)
+        obj[service[2]] = arg
+    }
+
+}
+if(!curSvc){
+    help(1)
+}
+if(key){
+    help(4, `${curSvc},${curKey}`)
+}
+for(var i in Invoker){
+    if(mapper[i+'Fn']){
+        obj[i] = obj[i] || mapper[i+'Fn'].apply(null, Invoker[i])
+    }
+}
+console.log(JSON.stringify(obj, null, 2))
+for(var s of service[3]){
+    if(obj[s] === undefined){
+        help(3, `${curSvc},${s}`)
+    }
+}
+Fn[service[0]](obj)

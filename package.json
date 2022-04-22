@@ -1,0 +1,35 @@
+{
+  "name": "uiuxcli",
+  "version": "1.0.0",
+  "description": "The command line of uiux",
+  "dependencies": {
+    "@babel/core": "7.15.0",
+    "@babel/preset-react": "7.14.5",
+    "babel-loader": "8.2.2",
+    "copy-webpack-plugin": "^9.0.1",
+    "css-loader": "6.2.0",
+    "html-webpack-plugin": "5.3.2",
+    "style-loader": "3.2.1",
+    "less": "^4.1.1",
+    "less-loader": "^9.0.0",
+    "uiuxloader": "^2.0.0",
+    "serve": "12.0.0",
+    "webpack": "5.60.0",
+    "webpack-cli": "4.9.2",
+    "webpack-dev-server": "4.8.1",
+    "shelljs":"^0.8.5"
+  },
+  "bin": {
+    "uiux": "./bin/uiux"
+  },
+  "repository": {
+      "type": "git",
+      "url": "git+https://github.com/akq/uiuxcli.git"
+  },
+  "author": "akq",
+  "bugs": {
+      "url": "https://github.com/akq/uiuxcli/issues"
+  },
+  "homepage": "https://github.com/akq/uiuxcli",
+  "license": "Apache 2.0"
+}
