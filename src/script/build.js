@@ -234,13 +234,11 @@ if(!window.__URLS__){
     window.__URLS__ = {}
 
     for(var i in port){
-        // if(!window.__URLS__[i]) window.__URLS__[i] = {}
         for(var j in port[i]){
             var url = 'http://localhost:'+port[i][j]
             window.__URLS__[i+'@'+j] = url
             if(j==='latest')
                 window.__URLS__[i] = url
-            // window.__URLS__[i][j] = 'http://localhost:'+port[i][j]
         }
     }
 }`

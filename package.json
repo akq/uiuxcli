@@ -9,26 +9,27 @@
     "copy-webpack-plugin": "^9.0.1",
     "css-loader": "6.2.0",
     "html-webpack-plugin": "5.3.2",
-    "style-loader": "3.2.1",
     "less": "^4.1.1",
     "less-loader": "^9.0.0",
-    "uiuxloader": "^2.0.0",
     "serve": "12.0.0",
+    "shelljs": "^0.8.5",
+    "style-loader": "3.2.1",
+    "uiuxloader": "^2.0.1",
+    "uiuxtest": "^1.0.0",
     "webpack": "5.60.0",
     "webpack-cli": "4.9.2",
-    "webpack-dev-server": "4.8.1",
-    "shelljs":"^0.8.5"
+    "webpack-dev-server": "4.8.1"
   },
   "bin": {
     "uiux": "./bin/uiux"
   },
   "repository": {
-      "type": "git",
-      "url": "git+https://github.com/akq/uiuxcli.git"
+    "type": "git",
+    "url": "git+https://github.com/akq/uiuxcli.git"
   },
   "author": "akq",
   "bugs": {
-      "url": "https://github.com/akq/uiuxcli/issues"
+    "url": "https://github.com/akq/uiuxcli/issues"
   },
   "homepage": "https://github.com/akq/uiuxcli",
   "license": "Apache 2.0"

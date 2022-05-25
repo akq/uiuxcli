@@ -6,7 +6,7 @@ var { runCmd } = require('../src/script/util')
 var Fn = require('../src/script')
 
 var obj = {}, key, service
-var api = ['debug', 'dev']
+var api = ['debug', 'dev', 'test', 'preview']
 var Services = {
     [api[0]]: ['generalDebug', {
             base: 1
@@ -14,14 +14,31 @@ var Services = {
             , port: 1
         }, 'dir' //no --xxx command
     ]
-    , [api[1]]: ['coreDebug', {
-            repo: 1 
+    , [api[1]]: [
+        'coreDebug' //the function name
+        , {
+            repo: 1 // option to arguments of func above, 1 means directly use the value
             , port: 1
             , pull: 1
-            , branches: 'csv2arr'
-            , start: ['branches', 1]
+            , branches: 'csv2arr' //string means the function name in mapper
+            , start: ['branches', 1] //array means pass the option value to the function branchesFn's second argument, then send the result to the branches 
             , remote: ['branches', 0]
-        }, 'dir', ['repo', 'branches']
+        }
+        , 'dir' //the last option to arguments of func above, which is no prefex double dash
+        , ['repo', 'branches']
+    ]
+    , [api[2]]: [
+        'runTest'
+        , {
+            src: 1
+        }
+        , 'dir'
+    ]
+    , [api[3]]: [
+        'runPreviewer'
+        , {
+        }
+        , 'dir'
     ]
 }
 
@@ -132,6 +149,10 @@ var defaults = {
         , branches
         , port: 1234
     }
+    , [api[2]]:{
+        dir: cwd
+        , src: 'src'
+    }
 }
 // console.log(__dirname)
 var Invoker = {}
@@ -205,9 +226,10 @@ for(var i in Invoker){
     }
 }
 console.log(JSON.stringify(obj, null, 2))
-for(var s of service[3]){
-    if(obj[s] === undefined){
-        help(3, `${curSvc},${s}`)
+if(service[3])
+    for(var s of service[3]){
+        if(obj[s] === undefined){
+            help(3, `${curSvc},${s}`)
+        }
     }
-}
 Fn[service[0]](obj)
