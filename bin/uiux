@@ -31,6 +31,7 @@ var Services = {
         'runTest'
         , {
             src: 1
+            , domains: 1
         }
         , 'dir'
     ]
