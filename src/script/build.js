@@ -5,11 +5,11 @@ var path = require('path')
 var fs = require('fs')
 var {
     runCmd
-    , j
     , exitOrThrow
     , runOrThrow
+    , mapper
 } = require('./util')
-
+var j = path.join
 var cmd = {
     yarn(dir){
         if(!fs.existsSync(j(dir, 'package.json'))){
@@ -17,7 +17,7 @@ var cmd = {
             return 0
         }
         if(fs.existsSync(j(dir, 'yarn.lock')) && fs.existsSync(j(dir, 'node_modules'))){
-            console.log('packages are already installed.')
+            console.log('packages are already installed.', dir)
             return 0
         }
         console.log('running yarn...')
@@ -163,12 +163,15 @@ function random(min = 1, max = 1000) {
     else return random(min, max)
     return num
 }
-function updateMaster(dir, base, repo){
+
+function updateMaster(base, repo, pull){
     var folder = j(base, 'master')
     var git = j(folder, '.git')
     if(fs.existsSync(folder) && fs.existsSync(git)){
-        console.log('master branch exists, updating it...')
-        return runCmd(folder, `git pull`)
+        if(pull){
+            console.log('master branch exists, updating it...')
+            return runCmd(folder, `git pull`)
+        }
     }
     return cmd.cloneTag(base, repo, 'master')
 }
@@ -244,11 +247,13 @@ if(!window.__URLS__){
 }`
     fs.writeFileSync(j(dir, 'public', 'domain.js'), content)
 }
-function generalDebug({dir, base, repo, port}){
+
+//debug from release repo
+function generalDebug({dir, base, repo, port, pull}){
     if(!fs.existsSync(base)){
         fs.mkdirSync(base, {recursive: true})
     }
-    exitOrThrow(updateMaster(dir, base, repo))
+    exitOrThrow(updateMaster(base, repo, pull))
     debugOne(
         dir
         , {
@@ -271,8 +276,15 @@ function coreDebug({dir: base, repo, branches, port, pull}){
         }
         
         cmd.yarn(dir)
-        var [deps, main] = cmd.getUiDeps(dir)
-        var cfg = cmd.prepare(dir, main, deps)
+        try{
+            var [deps, main] = cmd.getUiDeps(dir)
+            var cfg = cmd.prepare(dir, main, deps)
+        }
+        catch(e){
+            console.log(`branch ${x} throws exception`, e)
+            return
+        }
+
         var p = !i? port: random(3000,4000)
         setPort(x.split('/').join('_'), ['latest'], p)
         cmd.start(cfg, 'latest', {port: p, open:!i, public: j(dir, "public")})
