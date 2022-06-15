@@ -7,7 +7,6 @@ var {
     runCmd
     , exitOrThrow
     , runOrThrow
-    , mapper
 } = require('./util')
 var j = path.join
 var cmd = {
@@ -16,7 +15,16 @@ var cmd = {
             console.log('no package.json found, will not run yarn command.')
             return 0
         }
-        if(fs.existsSync(j(dir, 'yarn.lock')) && fs.existsSync(j(dir, 'node_modules'))){
+        var ret = runCmd(dir, 'git diff --name-only --diff-filter=M')
+        var pkgUpdated = false
+        if(!ret.code){
+            var files = ret.stdout.trim().split('/n')
+            if(files.includes('package.json')){
+                pkgUpdated = true
+                console.log(dir+'/package.json has been updated locally.')
+            }
+        }
+        if(!pkgUpdated && fs.existsSync(j(dir, 'yarn.lock')) && fs.existsSync(j(dir, 'node_modules'))){
             console.log('packages are already installed.', dir)
             return 0
         }

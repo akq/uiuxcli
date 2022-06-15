@@ -1,5 +1,4 @@
-var shell = require('shelljs');
-var path = require('path')
+var shell = require('shelljs')
 
 function runCmd(dir, cmd) {
     shell.cd(dir)
@@ -42,6 +41,7 @@ var mapper = {
             x = x.trim() 
             return x.startsWith(prefix) 
             && ! x.startsWith(prefix + '/HEAD')
+            && ! x.startsWith(prefix + '/!')
             && x !== prefix + '/main' 
             && x !== prefix + '/master' 
             && x !== prefix + '/' + starter
