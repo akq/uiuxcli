@@ -10,18 +10,18 @@ var {
 } = require('./util')
 var j = path.join
 var cmd = {
-    yarn(dir){
+    yarn(dir, hash){
         if(!fs.existsSync(j(dir, 'package.json'))){
             console.log('no package.json found, will not run yarn command.')
             return 0
         }
-        var ret = runCmd(dir, 'git diff --name-only --diff-filter=M')
+        var ret = runCmd(dir, `git diff --name-only --diff-filter=M` + (hash?` ${hash}..HEAD`:''))
         var pkgUpdated = false
         if(!ret.code){
-            var files = ret.stdout.trim().split('/n')
+            var files = ret.stdout.trim().split('\n')
             if(files.includes('package.json')){
                 pkgUpdated = true
-                console.log(dir+'/package.json has been updated locally.')
+                console.log(dir+'/package.json has been updated.')
             }
         }
         if(!pkgUpdated && fs.existsSync(j(dir, 'yarn.lock')) && fs.existsSync(j(dir, 'node_modules'))){
@@ -274,16 +274,25 @@ function generalDebug({dir, base, repo, port, pull}){
     
 }
 
-function coreDebug({dir: base, repo, branches, port, pull}){
+function coreDebug({dir: base, repo, branches, port, pull=''}){
     branches.forEach((x, i)=>{
+        console.log('>>>>> processing the branch', x)
         var dir = j(base, x)
+        var curHash
         if(!fs.existsSync(dir))
             runOrThrow(base, `git clone ${repo} ${x} --branch=${x}`)
-        else if(pull){//pull the new code every time.
-            runOrThrow(dir, `git pull`)
+        else if(pull==='all' || pull.split(',').includes(x)){//pull the new code every time.
+            var ret = runCmd(dir, `git rev-parse --short HEAD`)
+            if(!ret.code){
+                curHash = ret.stdout.trim()
+            }
+            ret = runCmd(dir, `git pull`)
+            if(ret.code){
+                curHash = null
+            }
         }
         
-        cmd.yarn(dir)
+        cmd.yarn(dir, curHash)
         try{
             var [deps, main] = cmd.getUiDeps(dir)
             var cfg = cmd.prepare(dir, main, deps)

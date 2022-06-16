@@ -73,7 +73,7 @@ function help(status, arg) {
     print()
     print("Usage: " + cmd + " ["+api.join(' | ')+"] [--<options> <args>] [<dir>]")
     for(var i in Services){
-        print('\tThe avaialbe options for service ' + i)
+        print('\tThe avaialbe options for service "' + i+'"')
         for(var j in Services[i][1]){
             print('\t\t --'+j+' <args>')
         }
