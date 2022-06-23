@@ -2,7 +2,7 @@ var path = require('path')
 var UiuxLoaderPlugin = require("uiuxloader")
 var pluginFn = require('./plugin')
 var ruleFn = require('./rule')
-
+var use = require.resolve
 module.exports = (opt) => {
   var {
     dir, manifest
@@ -16,7 +16,7 @@ module.exports = (opt) => {
       return pluginFn[fn]?.(...x)
     }
   }) || []
-  var rules = rule?.map(x=>ruleFn[x]?.(opt)) || []
+  var rules = rule?.map(x=> typeof x==='string'? ruleFn[x]?.(opt) : x) || []
   var ctx = path.join(__dirname, '../..')
   return {
     name: manifest.name,
@@ -46,10 +46,10 @@ module.exports = (opt) => {
         },
         {
           test: /\.jsx?$/,
-          loader: path.join(ctx, "node_modules/babel-loader"),
+          loader: use('babel-loader'),//path.join(ctx, "node_modules/babel-loader"),
           exclude: /node_modules/,
           options: {
-            presets: [path.join(ctx, "node_modules/@babel/preset-react")],
+            presets: [use('@babel/preset-react')],
             // context: ctx 
           },
         },

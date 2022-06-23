@@ -1,18 +1,50 @@
 var path = require('path')
 
 var exp = {}
-var ctx = (n) => path.join(__dirname, '../../node_modules', n)
+// var ctx = (n) => path.join(__dirname, '../../node_modules', n)
+var use = require.resolve//(n) => path.join(__dirname, '../../node_modules', n)
 exp.css = (opt) => ({
     test: /\.css$/i,
-    use: [ctx("style-loader"), ctx("css-loader")],
+    use: [use("style-loader"), use("css-loader")],
 })
 exp.less = (opt) => ({
     test: /\.less/i,
-    use: [ctx("style-loader"), ctx("css-loader"), ctx('less-loader')]
+    use: [use("style-loader"), use("css-loader"), use('less-loader')]
 })
 exp.scss = (opt) => ({
     test: /\.scss/i,
-    use: [ctx("style-loader"), ctx("css-loader"), ctx('sass-loader')]
+    use: [use("style-loader"), use("css-loader"), use('sass-loader')]
+})
+exp.font = (opt)=>({
+    test: /\.(woff|ttf|otf|eot|woff2|svg)$/,
+    use: use('file-loader')
+})
+exp.image = (opt)=>({
+    test: /\.(gif|jpg|png|jpeg|ico)$/,
+    use: use('url-loader')
+})
+exp.svg = (opt) => ({
+    test: /\.svg$/,
+    exclude: /node_modules/,
+    use: [
+        {
+            loader: use('babel-loader'),
+            options: {
+                presets: [use('@babel/preset-react')],
+                // context: ctx 
+              }
+        },
+        {
+            loader: use('react-svg-loader'),
+            options: {
+                svgo: {
+                    plugins: [{ removeTitle: false }],
+                    floatPrecision: 2
+                },
+                jsx: true
+            }
+        }
+    ]
 })
 
 module.exports = exp
