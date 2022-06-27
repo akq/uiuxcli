@@ -3,28 +3,47 @@ var DevServ = require('webpack-dev-server')
 var createCfg = require('../config/tmpl.config')
 var path = require('path')
 var fs = require('fs')
+
 var {
     runCmd
     , exitOrThrow
     , runOrThrow
 } = require('./util')
+
+// var { Worker } = require("worker_threads");
+
+// //Create new worker
+// var worker = new Worker("./worker.js");
+// worker.on("message", result => {
+
+// });
+
+
 var j = path.join
+function logStart(name, version, port) {
+
+    console.log()
+    console.log(`${name}@${version} : ${port}`)
+    console.log(`\tStop with: http://localhost:${port}/_/action/stop`)
+    console.log(`\tRestart with: http://localhost:${port}/_/action/restart`)
+    console.log()
+}
 var cmd = {
-    yarn(dir, hash){
-        if(!fs.existsSync(j(dir, 'package.json'))){
+    yarn(dir, hash) {
+        if (!fs.existsSync(j(dir, 'package.json'))) {
             console.log('no package.json found, will not run yarn command.')
             return 0
         }
-        var ret = runCmd(dir, `git diff --name-only --diff-filter=M` + (hash?` ${hash}..HEAD`:''))
+        var ret = runCmd(dir, `git diff --name-only --diff-filter=M` + (hash ? ` ${hash}..HEAD` : ''))
         var pkgUpdated = false
-        if(!ret.code){
+        if (!ret.code) {
             var files = ret.stdout.trim().split('\n')
-            if(files.includes('package.json')){
+            if (files.includes('package.json')) {
                 pkgUpdated = true
-                console.log(dir+'/package.json has been updated.')
+                console.log(dir + '/package.json has been updated.')
             }
         }
-        if(!pkgUpdated && fs.existsSync(j(dir, 'yarn.lock')) && fs.existsSync(j(dir, 'node_modules'))){
+        if (!pkgUpdated && fs.existsSync(j(dir, 'yarn.lock')) && fs.existsSync(j(dir, 'node_modules'))) {
             console.log('packages are already installed.', dir)
             return 0
         }
@@ -32,18 +51,18 @@ var cmd = {
         exitOrThrow(runCmd(dir, `yarn`))
 
     }
-    , getUiDeps(dir){
-        try{
+    , getUiDeps(dir) {
+        try {
             var pkg = require(j(dir, './package.json'))
             return [pkg.uiDependencies, pkg.main]
-        } 
-        catch(e){
+        }
+        catch (e) {
             throw {
-                msg: 'package.json is not found in the folder: '+ dir
+                msg: 'package.json is not found in the folder: ' + dir
             }
         }
     }
-    , prepare(dir, main, deps){
+    , prepare(dir, main, deps) {
         var manifest = require(j(dir, './manifest'))
         var origMods = manifest.module
         var module = {}
@@ -60,14 +79,15 @@ var cmd = {
         return cfg
     }
     // , async start(opts, ctx){
-    , start(cfg, version, dev){
-        var {name, ...cfg0} = cfg
-        var {port, open, public} = dev
+    , start(cfg, version, dev, servers) {
+        var { name, ...cfg0 } = cfg
+        var { port, open, public } = dev
         var compiler = Webpack(cfg0)
-        var devServerOptions = { port, open
+        var devServerOptions = {
+            port, open
             , ...cfg0.devServer
             // static is v4 option
-            , static:{
+            , static: {
                 ...cfg0.devServer?.static
                 , directory: public
             }
@@ -77,28 +97,76 @@ var cmd = {
                 "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
                 "Access-Control-Allow-Headers": "X-Requested-With, content-type, Authorization"
             }
+
         }
-        //v4 compiler is the last args
+
+        if(open){
+            devServerOptions.setupMiddlewares = (middlewares, svr) => {
+                var stopServer = false, stopping = 0
+                svr.app.use(function(req, res, next) {
+                    res.header("Access-Control-Allow-Origin", "*")
+                    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
+                    // res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
+                    next();
+                });
+                svr.app.get('/_/action/:type/:id',async (req, res) => {
+                    var { params: { id, type } } = req
+                    console.log('-----------'+type+'--------------')
+                    var {version, server: sv, cfg, dev} = servers[id]
+                    var {name} = cfg
+                    if(type === 'stop' || type === 'restart'){
+                        var m1 = `Stopping ${name}@${version} at port ${id}`
+                        var m2 = `Terminated ${name}@${version} at port ${id}`
+                        var running = !!sv.server
+                        if(running){ //stop, restart
+                            console.log(m1)
+                            await sv.stop()
+                            console.log(m2)
+                        }
+                        if(type === 'stop'){
+                            return res.send(running? m2: m1)
+                        }
+                    }
+                    if(type === 'start' || type === 'restart'){
+                        var m3 = `Starting ${name}@${version} at port ${id}`
+                        var m4 = `Running ${name}@${version} at port ${id}`
+                        var stopped = !sv.server
+                        if(stopped){ //stop, restart
+                            console.log(m3)
+                            // await sv.start()
+                            cmd.start(cfg,version, dev, servers )
+                            console.log(m4)
+                            logStart(name, version, id)
+                        }
+                        return res.send(stopped? m4: m3)
+                    }
+
+                });
+                return middlewares
+            }
+    }
+           
+            //v4 compiler is the last args
         var server = new DevServ(devServerOptions, compiler)
-        // console.log(`Starting debug server for the domain: ${name} at port: ${port}`)
-        
         // await server.start()
         //v4 uses start
-        server.start().then(x=>{
-            console.log(`${name}@${version} : ${port}`)
-        })
+        // .then(x=>{
+        server.start().then(x=>logStart(name, version, port))
+        // })
         // var server = new DevServ(compiler, devServerOptions)
         // server.listen(port, 'localhost', (x)=>{
         //     console.log(`${name}@${version} : ${port}`)
         // })
+        servers[port].server = server
+        return server
     }
-    , build(cfg){
-        var {name, ...cfg0} = cfg
+    , build(cfg) {
+        var { name, ...cfg0 } = cfg
         var compiler = Webpack(cfg0)
         compiler.run()
     }
-    , getTag(base, domain, ver){
-        var str = fs.readFileSync(j(base, 'master/domain', domain+'.json'))
+    , getTag(base, domain, ver) {
+        var str = fs.readFileSync(j(base, 'master/domain', domain + '.json'))
         //TODO exception
         var info = JSON.parse(str)
         var dists = info['dist-tags'] || {}
@@ -107,10 +175,10 @@ var cmd = {
         // var branch = info.branch || domain.split('/').join('_')// uiux/html
         var branch = domain.split('_').join('/')// uiux/html
 
-        for(var i in dists){
+        for (var i in dists) {
             var d = dists[i]
-            if(!d) continue
-            if(verDict[d]===undefined){
+            if (!d) continue
+            if (verDict[d] === undefined) {
                 verDict[d] = tags.length
                 tags.push({
                     tag: branch + '/' + d
@@ -118,44 +186,44 @@ var cmd = {
                     , dist: [i]
                 })
             }
-            else{
+            else {
                 tags[verDict[d]].dist.push(i)
             }
-                // if(parts[1] === 'alpha'){
-                //     folder = tag + '-' + info?.alpha?.[parts[0]] // 1.0.0-alpha-a1b2c3
-                // }
-                // else 
+            // if(parts[1] === 'alpha'){
+            //     folder = tag + '-' + info?.alpha?.[parts[0]] // 1.0.0-alpha-a1b2c3
+            // }
+            // else 
         }
 
         return tags
     }
-    , cloneTag(base, repo, tag, f){
-        if(!f) f = tag
+    , cloneTag(base, repo, tag, f) {
+        if (!f) f = tag
         //tag: uiux/engine/@1.0.0-alpha
         var folder = j(base, f)
         // folder exists, then exit
-        if(fs.existsSync(folder)){
-            if(!updatedFolder[folder]){
+        if (fs.existsSync(folder)) {
+            if (!updatedFolder[folder]) {
                 runCmd(folder, `git fetch --tags -f`)
                 runCmd(folder, `git checkout ${tag}`)
                 updatedFolder[folder] = 1
             }
             return 0
         }
-        console.log('Branch or tag '+tag+' does not exist, cloning it...')
+        console.log('Branch or tag ' + tag + ' does not exist, cloning it...')
         return runCmd(base, `git clone ${repo} ${folder} --branch=${tag}`)
     }
-    , bareClone(base, repo, branches){
-        if(!fs.existsSync(j(base, '.bare'))){
+    , bareClone(base, repo, branches) {
+        if (!fs.existsSync(j(base, '.bare'))) {
             runOrThrow(base, `git clone --bare ${repo} .bare`)
         }
-        if(!fs.existsSync(j(base, '.git'))){
+        if (!fs.existsSync(j(base, '.git'))) {
             fs.writeFileSync(path.join(base, '.git'), 'gitdir: ./.bare')
         }
-        if(typeof branches === 'string')
+        if (typeof branches === 'string')
             branches = [branches]
-        branches.forEach(x=>{
-            if(!fs.existsSync(j(base, x)))
+        branches.forEach(x => {
+            if (!fs.existsSync(j(base, x)))
                 runOrThrow(base, `git worktree add ./${x} ${x}`)
         })
     }
@@ -166,17 +234,17 @@ var domainPorts = {}
 var used = {}
 function random(min = 1, max = 1000) {
     var num = Math.floor(Math.random() * (max - min) + min)
-    if(!used[num]) 
+    if (!used[num])
         used[num] = 1
     else return random(min, max)
     return num
 }
 
-function updateMaster(base, repo, pull){
+function updateMaster(base, repo, pull) {
     var folder = j(base, 'master')
     var git = j(folder, '.git')
-    if(fs.existsSync(folder) && fs.existsSync(git)){
-        if(pull){
+    if (fs.existsSync(folder) && fs.existsSync(git)) {
+        if (pull) {
             console.log('master branch exists, updating it...')
             return runCmd(folder, `git pull`)
         }
@@ -184,12 +252,12 @@ function updateMaster(base, repo, pull){
     return cmd.cloneTag(base, repo, 'master')
 }
 
-function setPort(domain, verList, port){
-    if(!domainPorts[domain])
+function setPort(domain, verList, port) {
+    if (!domainPorts[domain])
         domainPorts[domain] = {}
-    for(var ver of verList){
+    for (var ver of verList) {
         var v = ver.split('-')[0]
-        if(!domainPorts[domain][v])
+        if (!domainPorts[domain][v])
             domainPorts[domain][v] = port
     }
 
@@ -197,29 +265,29 @@ function setPort(domain, verList, port){
 
 //git tag -l --points-at HEAD
 var done = {}
-function debugOne(dir, {base, repo, port, open = true}){
-    if(done[dir]){
+function debugOne(dir, { base, repo, port, open = true }) {
+    if (done[dir]) {
         console.log(`The dir ${dir} has been processed. exit...`)
         return
     }
     done[dir] = 1
-    console.log('Processing '+dir + '....')
+    console.log('Processing ' + dir + '....')
 
     cmd.yarn(dir)
     var [deps, main] = cmd.getUiDeps(dir)
 
     //for each ui dependency
-    for(var i in deps){  
+    for (var i in deps) {
         var tags = cmd.getTag(base, i, deps[i])
-        for(var item of tags){
+        for (var item of tags) {
             exitOrThrow(cmd.cloneTag(base, repo, item.tag, item.folder))
             var p1 = port
-            if(port){
+            if (port) {
                 // domainPorts[i][dir] = port
-                p1 = random(3000,4000)
+                p1 = random(3000, 4000)
                 setPort(i, item.dist, p1)
             }
-            debugOne(j(base, item.folder), {base, repo, port:p1, open:false})
+            debugOne(j(base, item.folder), { base, repo, port: p1, open: false })
         }
 
         // var tag =  branch + '-' +deps[i]
@@ -229,15 +297,15 @@ function debugOne(dir, {base, repo, port, open = true}){
 
     var cfg = cmd.prepare(dir, main, deps)
     var version = dir.split(path.sep).pop()
-    if(port){
-        cmd.start(cfg, version, {port, open, public: j(dir, "public")})
+    if (port) {
+        cmd.start(cfg, version, { port, open, public: j(dir, "public") })
     }
     else cmd.build(cfg)
 
 }
 
 
-function writeDebugDomains(dir){
+function writeDebugDomains(dir) {
     var content = `
 var port = ${JSON.stringify(domainPorts)}
 
@@ -255,11 +323,73 @@ if(!window.__URLS__){
 }`
     fs.writeFileSync(j(dir, 'public', 'domain.js'), content)
 }
+function writeDebugHTML(dir, server, defPort) {
+    var list = []
+    var port = domainPorts
+    var debugUrl = 'http://localhost:'+defPort+'/debug.html'
+    for(var i in port){
+        for(var k in port[i]){
+            var p = port[i][k]
+            var url = 'http://localhost:'+ p
+            var stopBtn = p === defPort ? '': `<button onclick="action(this, '${p}')" id='toggle_${p}'>stop</button>`
+            list.push(`<li style='color: green;'  id='_${p}'>${i}@${k}:<a href='${url}/remoteEntry.js'>${url}</a> ${stopBtn} <button onclick="action(this, '${p}')" id='restart_${p}'>restart</button></li>`)
+        }
+    }
+
+    var content = `<html>    <head><script>
+    function action(btn, id){
+        var type = btn.textContent
+        btn.disabled = true
+        
+        var pro = fetch('http://localhost:${defPort}/_/action/'+type+'/'+id);
+        if(id===${defPort}){
+            setTimeout(x=>window.close(), 1000)
+        }
+        else
+            pro.then(x=>{
+                switch(type){
+                    case 'stop':
+                        document.querySelector('#_'+id).style.color='red'
+                        document.querySelector('#toggle_'+id).textContent  = 'start'
+                    document.querySelector('#restart_'+id).disabled = true
+                    break
+                case 'start':
+                    fetch('http://localhost:'+id+'/remoteEntry.js').then(x=>{
+                        document.querySelector('#_'+id).style.color='green'
+                        document.querySelector('#toggle_'+id).textContent  = 'stop'
+                        document.querySelector('#restart_'+id).disabled = false
+                        
+                    })
+                    .catch(x=> alert('can\\'t start port '+id))
+                    .finally(x=> btn.disabled = false)
+                    break
+                case 'restart': 
+                    document.querySelector('#toggle_'+id).disabled  = true
+                    fetch('http://localhost:'+id+'/remoteEntry.js')
+                    .catch(x=> alert('can\\'t restart port '+id))
+                    .finally(x=>{
+                        document.querySelector('#toggle_'+id).disabled  = false
+                        btn.disabled = false
+                    })
+                }
+            }).finally(x=>{
+                if(type==='stop') btn.disabled = false
+            })
+    }
+    </script></head><body>
+        <ul>
+            ${list.join('\n')}
+        </ul>
+        </body></html>`
+    fs.writeFileSync(j(dir, 'public', 'debug.html'), content)
+    // debugger
+    server.openBrowser(debugUrl)
+}
 
 //debug from release repo
-function generalDebug({dir, base, repo, port, pull}){
-    if(!fs.existsSync(base)){
-        fs.mkdirSync(base, {recursive: true})
+function generalDebug({ dir, base, repo, port, pull }) {
+    if (!fs.existsSync(base)) {
+        fs.mkdirSync(base, { recursive: true })
     }
     exitOrThrow(updateMaster(base, repo, pull))
     debugOne(
@@ -271,42 +401,47 @@ function generalDebug({dir, base, repo, port, pull}){
         }
     )
     writeDebugDomains(dir)
-    
 }
 
-function coreDebug({dir: base, repo, branches, port, pull=''}){
-    branches.forEach((x, i)=>{
+function coreDebug({ dir: base, repo, branches, port, pull = '' }) {
+    var server, servers = {}
+    branches.forEach((x, i) => {
         console.log('>>>>> processing the branch', x)
         var dir = j(base, x)
         var curHash
-        if(!fs.existsSync(dir))
+        if (!fs.existsSync(dir))
             runOrThrow(base, `git clone ${repo} ${x} --branch=${x}`)
-        else if(pull==='all' || pull.split(',').includes(x)){//pull the new code every time.
+        else if (pull === 'all' || pull.split(',').includes(x)) {//pull the new code every time.
             var ret = runCmd(dir, `git rev-parse --short HEAD`)
-            if(!ret.code){
+            if (!ret.code) {
                 curHash = ret.stdout.trim()
             }
             ret = runCmd(dir, `git pull`)
-            if(ret.code){
+            if (ret.code) {
                 curHash = null
             }
         }
-        
+
         cmd.yarn(dir, curHash)
-        try{
+        try {
             var [deps, main] = cmd.getUiDeps(dir)
             var cfg = cmd.prepare(dir, main, deps)
         }
-        catch(e){
+        catch (e) {
             console.log(`branch ${x} throws exception`, e)
             return
         }
 
-        var p = !i? port: random(3000,4000)
+        var p = !i ? port : random(3000, 4000)
         setPort(x.split('/').join('_'), ['latest'], p)
-        cmd.start(cfg, 'latest', {port: p, open:!i, public: j(dir, "public")})
-    }) 
-    writeDebugDomains(j(base, branches[0]))
+        var dev = { port: p, open: !i, public: j(dir, "public") }
+        servers[p] = {cfg, dev, version: 'latest'}
+        var s = cmd.start(cfg, 'latest', dev , servers)
+        if(!server) {server = s}
+    })
+    var pub = j(base, branches[0])
+    writeDebugDomains(pub)
+    writeDebugHTML(pub, server, port)
 
 }
 
