@@ -6,7 +6,7 @@ var { mapper } = require('../src/script/util')
 var Fn = require('../src/script')
 
 var obj = {}, key, service
-var api = ['debug', 'dev', 'test', 'preview']
+var api = ['debug', 'dev', 'test', 'preview', 'build']//, 'clean']
 var Services = {
     [api[0]]: ['generalDebug', {
             base: 1
@@ -26,7 +26,7 @@ var Services = {
             , remote: ['branches', 0]
         }
         , 'dir' //the last option to arguments of func above, which is no prefex double dash
-        , ['repo', 'branches']
+        , ['repo', 'branches'] //mandatory option
     ]
     , [api[2]]: [
         'runTest'
@@ -41,6 +41,11 @@ var Services = {
         , {
         }
         , 'dir'
+    ]
+    , [api[4]]: [
+        'releaseOne'
+        , {}
+        , 'dir' //the last option to arguments of func above, which is no prefex double dash
     ]
 }
 
@@ -116,6 +121,12 @@ var defaults = (arg)=>{
             return {
                 dir: cwd
                 , src: 'src'
+            }
+        case api[4]: 
+            return {
+                dir: repo? path.resolve(cwd, '..'): cwd
+                , repo
+                , branch: curBranch
             }
         
     }

@@ -21,9 +21,9 @@ var {
 
 var j = path.join
 function logStart(name, version, port) {
-
     console.log()
     console.log(`${name}@${version} : ${port}`)
+    console.log(`\tStart with: http://localhost:${port}/_/action/start`)
     console.log(`\tStop with: http://localhost:${port}/_/action/stop`)
     console.log(`\tRestart with: http://localhost:${port}/_/action/restart`)
     console.log()
@@ -63,7 +63,9 @@ var cmd = {
         }
     }
     , prepare(dir, main, deps) {
-        var manifest = require(j(dir, './manifest'))
+        var p = j(dir, './manifest')
+        delete require.cache[require.resolve(p)]
+        var manifest = require(p)
         var origMods = manifest.module
         var module = {}
         for (var i in origMods) {
@@ -79,6 +81,25 @@ var cmd = {
         return cfg
     }
     // , async start(opts, ctx){
+    , releaseSingle(cfg){
+        var {name, ...cfg0} = cfg
+        cfg0.mode = "production"
+        var compiler = Webpack(cfg0)
+        console.log('start to compile '+ name)
+        compiler.run((err, stats) => {
+            if (err) {
+                console.log(JSON.stringify(err))
+            }
+            console.log( JSON.stringify(stats.toJson({ all: false, warnings: true, errors: true })))
+            compiler.close((closeErr) => {
+                if(closeErr)
+                    console.log(name, 'compiled with error', closeErr)
+                else{
+                    console.log(name, 'compiled successfully')
+                }
+            });
+        })
+    }
     , start(cfg, version, dev, servers) {
         var { name, ...cfg0 } = cfg
         var { port, open, public } = dev
@@ -102,7 +123,6 @@ var cmd = {
 
         if(open){
             devServerOptions.setupMiddlewares = (middlewares, svr) => {
-                var stopServer = false, stopping = 0
                 svr.app.use(function(req, res, next) {
                     res.header("Access-Control-Allow-Origin", "*")
                     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
@@ -112,7 +132,11 @@ var cmd = {
                 svr.app.get('/_/action/:type/:id',async (req, res) => {
                     var { params: { id, type } } = req
                     console.log('-----------'+type+'--------------')
-                    var {version, server: sv, cfg, dev} = servers[id]
+                    var {version, server: sv, dir, dev} = servers[id]
+                    var cfg = getCfg(dir)
+                    if(!cfg){
+                        return res.status(500).send({x:'cfg error'})
+                    }
                     var {name} = cfg
                     if(type === 'stop' || type === 'restart'){
                         var m1 = `Stopping ${name}@${version} at port ${id}`
@@ -134,7 +158,7 @@ var cmd = {
                         if(stopped){ //stop, restart
                             console.log(m3)
                             // await sv.start()
-                            cmd.start(cfg,version, dev, servers )
+                            cmd.start(cfg, version, dev, servers )
                             console.log(m4)
                             logStart(name, version, id)
                         }
@@ -144,7 +168,7 @@ var cmd = {
                 });
                 return middlewares
             }
-    }
+        }
            
             //v4 compiler is the last args
         var server = new DevServ(devServerOptions, compiler)
@@ -300,7 +324,7 @@ function debugOne(dir, { base, repo, port, open = true }) {
     if (port) {
         cmd.start(cfg, version, { port, open, public: j(dir, "public") })
     }
-    else cmd.build(cfg)
+    else cmd.releaseSingle(cfg)
 
 }
 
@@ -331,12 +355,30 @@ function writeDebugHTML(dir, server, defPort) {
         for(var k in port[i]){
             var p = port[i][k]
             var url = 'http://localhost:'+ p
-            var stopBtn = p === defPort ? '': `<button onclick="action(this, '${p}')" id='toggle_${p}'>stop</button>`
-            list.push(`<li style='color: green;'  id='_${p}'>${i}@${k}:<a href='${url}/remoteEntry.js'>${url}</a> ${stopBtn} <button onclick="action(this, '${p}')" id='restart_${p}'>restart</button></li>`)
+            var stopBtn = p === defPort ? '': `<button onclick="action(this, '${p}')" id='toggle_${p}' disabled>stop</button>`
+            list.push(`<li style='color: green;'  id='_${p}'>${i}@${k}:<a href='${url}/remoteEntry.js' port='${p}'>${url}</a> ${stopBtn} <button onclick="action(this, '${p}')" id='restart_${p}' disabled>restart</button></li>`)
         }
     }
 
     var content = `<html>    <head><script>
+    function stop(id){
+        document.querySelector('#_'+id).style.color='red'
+        var tg = document.querySelector('#toggle_'+id)
+        if(tg){ 
+            tg.textContent  = 'start'
+            tg.disabled = false
+        }
+        document.querySelector('#restart_'+id).disabled = true
+    }    
+    function start(id){
+        document.querySelector('#_'+id).style.color='green'
+        var tg = document.querySelector('#toggle_'+id)
+        if(tg) {
+            tg.textContent  = 'stop'
+            tg.disabled = false
+        }
+        document.querySelector('#restart_'+id).disabled = false
+    }    
     function action(btn, id){
         var type = btn.textContent
         btn.disabled = true
@@ -349,16 +391,11 @@ function writeDebugHTML(dir, server, defPort) {
             pro.then(x=>{
                 switch(type){
                     case 'stop':
-                        document.querySelector('#_'+id).style.color='red'
-                        document.querySelector('#toggle_'+id).textContent  = 'start'
-                    document.querySelector('#restart_'+id).disabled = true
+                        stop(id)
                     break
                 case 'start':
                     fetch('http://localhost:'+id+'/remoteEntry.js').then(x=>{
-                        document.querySelector('#_'+id).style.color='green'
-                        document.querySelector('#toggle_'+id).textContent  = 'stop'
-                        document.querySelector('#restart_'+id).disabled = false
-                        
+                        start(id)
                     })
                     .catch(x=> alert('can\\'t start port '+id))
                     .finally(x=> btn.disabled = false)
@@ -380,6 +417,18 @@ function writeDebugHTML(dir, server, defPort) {
         <ul>
             ${list.join('\n')}
         </ul>
+        <script>
+        var links = document.querySelectorAll('li > a')
+        for(let a of links){
+            fetch(a.href).then(x=>{
+                var tg = document.querySelector('#toggle_' + a.port)
+                if(tg) tg.disabled  = false
+                start(a.port)
+            }).catch(x=>{
+                stop(a.port)
+            })
+        }
+        </script>
         </body></html>`
     fs.writeFileSync(j(dir, 'public', 'debug.html'), content)
     // debugger
@@ -402,40 +451,51 @@ function generalDebug({ dir, base, repo, port, pull }) {
     )
     writeDebugDomains(dir)
 }
+var getCfg = (dir)=>{
+    try {
+        var [deps, main] = cmd.getUiDeps(dir)
+        var cfg = cmd.prepare(dir, main, deps)
+    }
+    catch (e) {
+        console.log(`dir ${dir} throws exception`, e)
+        return
+    }
+    return cfg
+}
+function getBranchCfg(branch, base, repo, pull){
+    console.log('>>>>> processing the branch', branch)
+    var dir = j(base, branch)
+    var curHash
+    if (!fs.existsSync(dir))
+        runOrThrow(base, `git clone ${repo} ${branch} --branch=${branch}`)
+    else if (pull === 'all' || pull.split(',').includes(branch)) {//pull the new code every time.
+        var ret = runCmd(dir, `git rev-parse --short HEAD`)
+        if (!ret.code) {
+            curHash = ret.stdout.trim()
+        }
+        ret = runCmd(dir, `git pull`)
+        if (ret.code) {
+            curHash = null
+        }
+    }
 
+    cmd.yarn(dir, curHash)
+    var cfg = getCfg(dir)
+    return cfg
+
+}
 function coreDebug({ dir: base, repo, branches, port, pull = '' }) {
     var server, servers = {}
     branches.forEach((x, i) => {
-        console.log('>>>>> processing the branch', x)
+        
+        var cfg = getBranchCfg(x, base, repo, pull)
+        if(!cfg) return
+
         var dir = j(base, x)
-        var curHash
-        if (!fs.existsSync(dir))
-            runOrThrow(base, `git clone ${repo} ${x} --branch=${x}`)
-        else if (pull === 'all' || pull.split(',').includes(x)) {//pull the new code every time.
-            var ret = runCmd(dir, `git rev-parse --short HEAD`)
-            if (!ret.code) {
-                curHash = ret.stdout.trim()
-            }
-            ret = runCmd(dir, `git pull`)
-            if (ret.code) {
-                curHash = null
-            }
-        }
-
-        cmd.yarn(dir, curHash)
-        try {
-            var [deps, main] = cmd.getUiDeps(dir)
-            var cfg = cmd.prepare(dir, main, deps)
-        }
-        catch (e) {
-            console.log(`branch ${x} throws exception`, e)
-            return
-        }
-
         var p = !i ? port : random(3000, 4000)
         setPort(x.split('/').join('_'), ['latest'], p)
-        var dev = { port: p, open: !i, public: j(dir, "public") }
-        servers[p] = {cfg, dev, version: 'latest'}
+        var dev = { port: p, open: !i, public: j(dir , "public") }
+        servers[p] = {dir, dev, version: 'latest'}
         var s = cmd.start(cfg, 'latest', dev , servers)
         if(!server) {server = s}
     })
@@ -444,8 +504,27 @@ function coreDebug({ dir: base, repo, branches, port, pull = '' }) {
     writeDebugHTML(pub, server, port)
 
 }
+function releaseOne({dir}){
+    cmd.yarn(dir)
+    var cfg = getCfg(dir)
+    if(!cfg) {
+        console.log('configuration is not generated')
+        return
+    }
+    cmd.releaseSingle(cfg)
+}
+function coreAllRelease({ dir: base, repo, branches, port, pull = '' }) {
+    branches.forEach((x, i) => {
+        var cfg = getBranchCfg(x, base, repo, pull)
+        if(!cfg) return
+        cmd.releaseSingle(cfg)
+    })
+    // var pub = j(base, branches[0])
+    // writeDebugDomains(pub)
+}
 
 module.exports = {
     generalDebug
     , coreDebug
+    , releaseOne
 }
