@@ -2,20 +2,21 @@
 'use strict';
 
 var path = require('path')
-var { mapper } = require('../src/script/util')
+var { mapper } = require('../src/script/helper')
 var Fn = require('../src/script')
 
 var obj = {}, key, service
-var api = ['debug', 'dev', 'test', 'preview', 'build']//, 'clean']
+var api = ['debug', 'dev', 'test', 'preview', 'build', 'proj']//, 'clean']
+api = api.reduce((a,c)=>{a[c] = c;return a}, api)
 var Services = {
-    [api[0]]: ['generalDebug', {
+    [api.debug]: ['generalDebug', {
             base: 1
             , repo: 1
             , port: 1
             , pull: 1
         }, 'dir' //no --xxx command
     ]
-    , [api[1]]: [
+    , [api.dev]: [
         'coreDebug' //the function name
         , {
             repo: 1 // option to arguments of func above, 1 means directly use the value
@@ -28,7 +29,7 @@ var Services = {
         , 'dir' //the last option to arguments of func above, which is no prefex double dash
         , ['repo', 'branches'] //mandatory option
     ]
-    , [api[2]]: [
+    , [api.test]: [
         'runTest'
         , {
             src: 1
@@ -36,15 +37,23 @@ var Services = {
         }
         , 'dir'
     ]
-    , [api[3]]: [
+    , [api.preview]: [
         'runPreviewer'
         , {
         }
         , 'dir'
     ]
-    , [api[4]]: [
+    , [api.build]: [
         'releaseOne'
         , {}
+        , 'dir' //the last option to arguments of func above, which is no prefex double dash
+    ]
+    , [api.proj]: [
+        'projCrud'
+        , {
+            add: 1
+            , delete: 1
+        }
         , 'dir' //the last option to arguments of func above, which is no prefex double dash
     ]
 }
@@ -90,7 +99,7 @@ var cwd = process.cwd()
 
 var defaults = (arg)=>{
     var curRemote, repo, curBranch, branches = ['master']
-    if(arg === api[0] || arg === api[1]){
+    if(arg === api.debug || arg === api.dev){
         try{
             curRemote = mapper.currentRemote()
         }
@@ -103,26 +112,26 @@ var defaults = (arg)=>{
         }
     }
     switch(arg){
-        case api[0]:
+        case api.debug:
             return {
                 dir: cwd
                 , base: path.resolve(cwd, '..')
                 , repo
                 , port: 1234
             }
-        case api[1]: 
+        case api.dev: 
             return {
                 dir: repo? path.resolve(cwd, '..'): cwd
                 , repo
                 , branches
                 , port: 1234
             }
-        case api[2]: 
+        case api.test: 
             return {
                 dir: cwd
                 , src: 'src'
             }
-        case api[4]: 
+        case api.build: 
             return {
                 dir: repo? path.resolve(cwd, '..'): cwd
                 , repo
@@ -193,6 +202,11 @@ for (var i = 2; i < process.argv.length; ++i) {
     }
 
 }
+
+if(service[2] && !obj[service[2]]){
+    obj[service[2]] = path.resolve(cwd, '.')
+}
+
 if(!curSvc){
     help(1)
 }

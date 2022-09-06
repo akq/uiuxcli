@@ -8,7 +8,7 @@ var {
     runCmd
     , exitOrThrow
     , runOrThrow
-} = require('./util')
+} = require('./helper')
 
 // var { Worker } = require("worker_threads");
 

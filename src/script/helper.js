@@ -17,7 +17,7 @@ function exitOrThrow(exit){
     // console.log('')
 }
 function runOrThrow(dir, cmd){
-    exitOrThrow(runCmd(dir, cmd))
+    return exitOrThrow(runCmd(dir, cmd))
 }
 var cwd = process.cwd()
 var mapper = {
@@ -29,6 +29,7 @@ var mapper = {
         else return ret.stdout.trim()
     }
     , branchesFn : (remote = 'origin', starter= 'master' ) => {
+        // runCmd(cwd, 'git fetch')
         var ret = runCmd(cwd, 'git branch -r')
         if(ret.code){
             return [starter]
