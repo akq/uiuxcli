@@ -1,6 +1,6 @@
 {
   "name": "uiuxcli",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "The command line of uiux",
   "dependencies": {
     "@babel/core": "7.15.0",

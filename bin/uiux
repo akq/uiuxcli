@@ -45,7 +45,9 @@ var Services = {
     ]
     , [api.build]: [
         'releaseOne'
-        , {}
+        , {
+            mode: 1
+        }
         , 'dir' //the last option to arguments of func above, which is no prefex double dash
     ]
     , [api.proj]: [

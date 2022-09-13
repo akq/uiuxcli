@@ -83,7 +83,7 @@ var cmd = {
     // , async start(opts, ctx){
     , releaseSingle(cfg){
         var {name, ...cfg0} = cfg
-        cfg0.mode = "production"
+        // cfg0.mode = "production"
         var compiler = Webpack(cfg0)
         console.log('start to compile '+ name)
         compiler.run((err, stats) => {
@@ -289,7 +289,7 @@ function setPort(domain, verList, port) {
 
 //git tag -l --points-at HEAD
 var done = {}
-function debugOne(dir, { base, repo, port, open = true }) {
+function debugOne(dir, { base, repo, port, defPorts = {}, open = true }) {
     if (done[dir]) {
         console.log(`The dir ${dir} has been processed. exit...`)
         return
@@ -308,10 +308,13 @@ function debugOne(dir, { base, repo, port, open = true }) {
             var p1 = port
             if (port) {
                 // domainPorts[i][dir] = port
-                p1 = random(3000, 4000)
+                var ver0 = item.dist[0]
+                var v = ver0.split('-')[0]
+                var dp = defPorts[i]?.[v]
+                p1 = dp || random(3000, 4000)
                 setPort(i, item.dist, p1)
             }
-            debugOne(j(base, item.folder), { base, repo, port: p1, open: false })
+            debugOne(j(base, item.folder), { base, repo, port: p1, defPorts, open: false })
         }
 
         // var tag =  branch + '-' +deps[i]
@@ -329,6 +332,17 @@ function debugOne(dir, { base, repo, port, open = true }) {
 }
 
 
+
+function readDebugDomains(dir) {
+    var file = j(dir, 'public', 'domain.js')
+    if(fs.existsSync(file)){
+        var content = fs.readFileSync(file)
+        var lines = content.toString().split('\n')
+        var ports = lines[1].substr('var port = '.length)
+        var obj = JSON.parse(ports)
+        return obj
+    }
+}
 function writeDebugDomains(dir) {
     var content = `
 var port = ${JSON.stringify(domainPorts)}
@@ -441,15 +455,17 @@ function generalDebug({ dir, base, repo, port, pull }) {
         fs.mkdirSync(base, { recursive: true })
     }
     exitOrThrow(updateMaster(base, repo, pull))
+    var defPorts = readDebugDomains(dir)
     debugOne(
         dir
         , {
             repo
             , port
             , base
+            , defPorts
         }
     )
-    writeDebugDomains(dir)
+    if(!defPorts) writeDebugDomains(dir)
 }
 var getCfg = (dir)=>{
     try {
@@ -486,31 +502,36 @@ function getBranchCfg(branch, base, repo, pull){
 }
 function coreDebug({ dir: base, repo, branches, port, pull = '' }) {
     var server, servers = {}
+    var pub = j(base, branches[0])
+    var defPorts = readDebugDomains(pub)
+    var ver = 'latest'
     branches.forEach((x, i) => {
         
         var cfg = getBranchCfg(x, base, repo, pull)
         if(!cfg) return
 
         var dir = j(base, x)
-        var p = !i ? port : random(3000, 4000)
-        setPort(x.split('/').join('_'), ['latest'], p)
+        var b = x.split('/').join('_')
+        var p = !i ? port : (defPorts?.[b]?.[ver] || random(3000, 4000))
+        setPort(b, [ver], p)
         var dev = { port: p, open: !i, public: j(dir , "public") }
-        servers[p] = {dir, dev, version: 'latest'}
-        var s = cmd.start(cfg, 'latest', dev , servers)
+        servers[p] = {dir, dev, version: ver}
+        var s = cmd.start(cfg, ver, dev , servers)
         if(!server) {server = s}
     })
-    var pub = j(base, branches[0])
-    writeDebugDomains(pub)
+    if(!defPorts)writeDebugDomains(pub)
     writeDebugHTML(pub, server, port)
 
 }
-function releaseOne({dir}){
+function releaseOne({mode, dir}){
     cmd.yarn(dir)
     var cfg = getCfg(dir)
     if(!cfg) {
         console.log('configuration is not generated')
         return
     }
+    if(mode) 
+        cfg.mode = 'production'
     cmd.releaseSingle(cfg)
 }
 function coreAllRelease({ dir: base, repo, branches, port, pull = '' }) {
