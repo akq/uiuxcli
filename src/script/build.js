@@ -131,6 +131,10 @@ var cmd = {
                 });
                 svr.app.get('/_/action/:type/:id',async (req, res) => {
                     var { params: { id, type } } = req
+                    if(!servers[id]){
+                        console.log(id+' is not listening')
+                        return
+                    }
                     console.log('-----------'+type+'--------------')
                     var {version, server: sv, dir, dev} = servers[id]
                     var cfg = getCfg(dir)
@@ -370,11 +374,15 @@ function writeDebugHTML(dir, server, defPort) {
             var p = port[i][k]
             var url = 'http://localhost:'+ p
             var stopBtn = p === defPort ? '': `<button onclick="action(this, '${p}')" id='toggle_${p}' disabled>stop</button>`
-            list.push(`<li style='color: green;'  id='_${p}'>${i}@${k}:<a href='${url}/remoteEntry.js' port='${p}'>${url}</a> ${stopBtn} <button onclick="action(this, '${p}')" id='restart_${p}' disabled>restart</button></li>`)
+            list.push(`<li style='color: green;'  id='_${p}'>${i}@${k}:<a href='${url}/remoteEntry.js' port='${p}'>${url}/remoteEntry.js</a> ${stopBtn} <button onclick="action(this, '${p}')" id='restart_${p}' disabled>restart</button>&nbsp;<span id="time_${p}"></span></li>`)
         }
     }
 
     var content = `<html>    <head><script>
+    function timer(id, span){
+        var t = document.querySelector('#time_'+id)
+        if(t) t.textContent = span/1000 + 's'
+    }
     function stop(id){
         document.querySelector('#_'+id).style.color='red'
         var tg = document.querySelector('#toggle_'+id)
@@ -392,7 +400,7 @@ function writeDebugHTML(dir, server, defPort) {
             tg.disabled = false
         }
         document.querySelector('#restart_'+id).disabled = false
-    }    
+    }
     function action(btn, id){
         var type = btn.textContent
         btn.disabled = true
@@ -401,15 +409,21 @@ function writeDebugHTML(dir, server, defPort) {
         if(id===${defPort}){
             setTimeout(x=>window.close(), 1000)
         }
-        else
+        else{
+            var cur = new Date()
             pro.then(x=>{
                 switch(type){
-                    case 'stop':
-                        stop(id)
+                case 'stop':
+                    var span = new Date() - cur
+                    stop(id)
+                    timer(id, span)
                     break
                 case 'start':
+                    
                     fetch('http://localhost:'+id+'/remoteEntry.js').then(x=>{
+                        var span = new Date() - cur
                         start(id)
+                        timer(id, span)
                     })
                     .catch(x=> alert('can\\'t start port '+id))
                     .finally(x=> btn.disabled = false)
@@ -419,6 +433,8 @@ function writeDebugHTML(dir, server, defPort) {
                     fetch('http://localhost:'+id+'/remoteEntry.js')
                     .catch(x=> alert('can\\'t restart port '+id))
                     .finally(x=>{
+                        var span = new Date() - cur
+                        timer(id, span)
                         document.querySelector('#toggle_'+id).disabled  = false
                         btn.disabled = false
                     })
@@ -426,13 +442,16 @@ function writeDebugHTML(dir, server, defPort) {
             }).finally(x=>{
                 if(type==='stop') btn.disabled = false
             })
+        }
     }
     </script></head><body>
         <ul>
             ${list.join('\n')}
         </ul>
+        <div id='time_sum'></div>
         <script>
         var links = document.querySelectorAll('li > a')
+        var cur2 = new Date()
         for(let a of links){
             fetch(a.href).then(x=>{
                 var tg = document.querySelector('#toggle_' + a.port)
@@ -440,6 +459,8 @@ function writeDebugHTML(dir, server, defPort) {
                 start(a.port)
             }).catch(x=>{
                 stop(a.port)
+            }).finally(x=>{
+                timer('sum', new Date()-cur2)
             })
         }
         </script>
@@ -500,13 +521,17 @@ function getBranchCfg(branch, base, repo, pull){
     return cfg
 
 }
-function coreDebug({ dir: base, repo, branches, port, pull = '' }) {
+function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=[] }) {
     var server, servers = {}
     var pub = j(base, branches[0])
     var defPorts = readDebugDomains(pub)
     var ver = 'latest'
+    var exc = excludes.reduce((a,c)=>{
+        a[c] = 1
+        return a
+    }, {})
     branches.forEach((x, i) => {
-        
+        if(exc[x]) return
         var cfg = getBranchCfg(x, base, repo, pull)
         if(!cfg) return
 
@@ -530,7 +555,7 @@ function releaseOne({mode, dir}){
         console.log('configuration is not generated')
         return
     }
-    if(mode) 
+    if(mode && !['dev', 'develop', 'development'].includes(cfg.mode.toLowerCase())) 
         cfg.mode = 'production'
     cmd.releaseSingle(cfg)
 }

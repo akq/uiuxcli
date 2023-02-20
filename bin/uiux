@@ -6,25 +6,59 @@ var { mapper } = require('../src/script/helper')
 var Fn = require('../src/script')
 
 var obj = {}, key, service
-var api = ['debug', 'dev', 'test', 'preview', 'build', 'proj']//, 'clean']
+var api = ['debug', 'dev', 'test', 'preview', 'build', 'proj', 'ver']//, 'clean']
 api = api.reduce((a,c)=>{a[c] = c;return a}, api)
 var Services = {
     [api.debug]: ['generalDebug', {
-            base: 1
-            , repo: 1
-            , port: 1
-            , pull: 1
+            base: {
+                v: 1
+                , msg: 'The base directory to contain all other branches, suppose cwd is ./master, default is the parent folder(..)'
+            }
+            , repo: {
+                v: 1
+                , msg: 'The repo url, default is the current origin'
+            }
+            , port: {
+                v: 1
+                , msg: 'the port for the host site, default is 1234'
+            }
+            , pull: {
+                v: 1
+                , msg: 'the flag to pull the latest codes or not when running the command. default is false'
+            }
         }, 'dir' //no --xxx command
     ]
     , [api.dev]: [
         'coreDebug' //the function name
         , {
-            repo: 1 // option to arguments of func above, 1 means directly use the value
-            , port: 1
-            , pull: 1
-            , branches: 'csv2arr' //string means the function name in mapper
-            , start: ['branches', 1] //array means pass the option value to the function branchesFn's second argument, then send the result to the branches 
-            , remote: ['branches', 0]
+            repo: {
+                v: 1 // option to arguments of func above, 1 means directly use the value
+                , msg: 'The repo url, default is the current origin'
+            } 
+            , port: {
+                v: 1
+                , msg: 'the port for the host site, default is 1234'
+            }
+            , pull: {
+                v: 1
+                , msg: 'the flag to pull the latest codes or not when running the command. default is false'
+            }
+            , branches: {
+                v: 'csv2arr' //string means the function name in mapper
+                , msg: 'branches need to be built, in csv form, default is all branches in the origin, except those branches starts with ! '
+            }
+            , excludes: {
+                v: 'csv2arr' //string means the function name in mapper
+                , msg: 'branches need to be excluded when start to build, in csv form, default is all branches in the origin, except those branches starts with ! '
+            }
+            , start: {
+                v: ['branches', 1] //array means pass the option value to the function branchesFn's second argument, then send the result to the branches 
+                , msg: 'the start branch name, like the main function, default is the current branch'
+            }
+            , remote: {
+                v: ['branches', 0] //array means pass the option value to the function branchesFn's second argument, then send the result to the branches 
+                , msg: 'the remote name to pull, default is origin'
+            }
         }
         , 'dir' //the last option to arguments of func above, which is no prefex double dash
         , ['repo', 'branches'] //mandatory option
@@ -32,8 +66,18 @@ var Services = {
     , [api.test]: [
         'runTest'
         , {
-            src: 1
-            , domains: 1
+            src: {
+                v: 1
+                , msg: 'default is src, it\'s the source folder path if you specify some other as your source folder '
+            }
+            , domainUrl: {
+                v: 1
+                , msg: 'the url of domain.js, default is http://localhost:1234/domain.js'
+            }
+            , port: {
+                v: 1
+                , msg: 'the port of the local domain.js, default is 1234, when it\'s specified, the domainUrl will be http://localhost:[port]/domain.js'
+            }
         }
         , 'dir'
     ]
@@ -43,18 +87,36 @@ var Services = {
         }
         , 'dir'
     ]
+    , [api.ver]: [
+        'getVersion'
+        , {
+        }
+        // , 'dir'
+    ]
     , [api.build]: [
         'releaseOne'
         , {
-            mode: 1
+            mode: {
+                v: 1
+                , msg: 'the release mode, production or development, development for not specifying this option or using dev, develop, development'
+                , eg: ['-', 'dev', 'develop', 'development', 'prod','production', ]
+            }
         }
         , 'dir' //the last option to arguments of func above, which is no prefex double dash
     ]
     , [api.proj]: [
         'projCrud'
         , {
-            add: 1
-            , delete: 1
+            add: {
+                v: 1
+                , msg: 'add a new project/branch from scratch'
+                , eg: ['sample', 'usr/sample']
+            }
+            , delete: {
+                v: 1
+                , msg: 'delete an existing project/branch'
+                , eg: ['sample', 'usr/sample']
+            }
         }
         , 'dir' //the last option to arguments of func above, which is no prefex double dash
     ]
@@ -89,10 +151,30 @@ function help(status, arg) {
     print()
     print("Usage: " + cmd + " ["+api.join(' | ')+"] [--<options> <args>] [<dir>]")
     for(var i in Services){
-        print('\tThe avaialbe options for service "' + i+'"')
-        for(var j in Services[i][1]){
-            print('\t\t --'+j+' <args>')
+        var opts = Services[i][1]
+        if(Object.keys(opts).length > 0){
+            print('\tAvailable options for service "' + i+'"')
+            for(var j in opts){
+                print('\t   --'+j+' <args>')
+                if(opts[j].msg) 
+                    print('\t     '+opts[j].msg)
+                var eg = opts[j].eg
+                if(eg){
+                    print('\t     //examples')
+                    if(typeof eg === 'string')
+                        eg = [eg]
+                    eg.forEach(x=>{
+                        if(x==='-')
+                            print('\t\t'+ [cmd, i].join(' '))
+                        else 
+                            print('\t\t'+ [cmd, i , '--'+j, x].join(' '))
+                    })
+                }
+            }
         }
+        else
+            print('\tNo options avaiable for service "' + i+'"')
+
     }
     process.exit(status);
 }
@@ -127,6 +209,7 @@ var defaults = (arg)=>{
                 , repo
                 , branches
                 , port: 1234
+                // , debugPort: 1235 //TODO
             }
         case api.test: 
             return {
@@ -183,7 +266,7 @@ for (var i = 2; i < process.argv.length; ++i) {
     }
     else if (arg.substr(0, 2) === '--'){
         var k = curKey = arg.substr(2)
-        var cmd = service[1][k]
+        var {v: cmd} = service[1][k]
         if(cmd === 1){
             key = k
         }
@@ -220,7 +303,8 @@ for(var i in Invoker){
         obj[i] = obj[i] || mapper[i+'Fn'].apply(null, Invoker[i])
     }
 }
-console.log(JSON.stringify(obj, null, 2))
+if(Object.keys(obj).length > 0)
+    console.log(JSON.stringify(obj, null, 2))
 if(service[3])
     for(var s of service[3]){
         if(obj[s] === undefined){
