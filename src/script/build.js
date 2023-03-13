@@ -262,9 +262,12 @@ var domainPorts = {}
 var used = {}
 function random(min = 1, max = 1000) {
     var num = Math.floor(Math.random() * (max - min) + min)
-    if (!used[num])
+    // console.log(num, min, max, used)
+    if (used[num])
+        num = random(min, max)
+    else
         used[num] = 1
-    else return random(min, max)
+    // else return random(min, max)
     return num
 }
 
@@ -363,6 +366,8 @@ if(!window.__URLS__){
         }
     }
 }`
+    if(!fs.existsSync(j(dir, 'public')))
+        fs.mkdirSync(j(dir, 'public'))
     fs.writeFileSync(j(dir, 'public', 'domain.js'), content)
 }
 function writeDebugHTML(dir, server, defPort) {
@@ -521,15 +526,38 @@ function getBranchCfg(branch, base, repo, pull){
     return cfg
 
 }
-function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=[] }) {
+function findAPort(obj, port){
+    if(!port){
+        do{
+            port = random(3000, 4000)
+            obj[port] = 1
+        }
+        while(!obj[port])
+    }
+    if(!obj[port]) 
+        obj[port] = 1
+    return port
+}
+async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=[], use=[] }) {
     var server, servers = {}
     var pub = j(base, branches[0])
+    
+    var pros = []
+    for(var ep of use){
+        pros.push(new Promise((resolve, reject) =>{
+            http.get('http://localhost:'+ep+'/domain.js', (res)=> {
+                resolve(res)
+            })
+        }))
+    }
+    var results = await Promise.all(pros)
     var defPorts = readDebugDomains(pub)
     var ver = 'latest'
     var exc = excludes.reduce((a,c)=>{
         a[c] = 1
         return a
     }, {})
+    var portObj = {}
     branches.forEach((x, i) => {
         if(exc[x]) return
         var cfg = getBranchCfg(x, base, repo, pull)
@@ -537,7 +565,7 @@ function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=[] }) 
 
         var dir = j(base, x)
         var b = x.split('/').join('_')
-        var p = !i ? port : (defPorts?.[b]?.[ver] || random(3000, 4000))
+        var p = !i ? port : findAPort(portObj, defPorts?.[b]?.[ver]) // (defPorts?.[b]?.[ver] || random(3000, 4000))
         setPort(b, [ver], p)
         var dev = { port: p, open: !i, public: j(dir , "public") }
         servers[p] = {dir, dev, version: ver}
@@ -545,7 +573,7 @@ function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=[] }) 
         if(!server) {server = s}
     })
     if(!defPorts)writeDebugDomains(pub)
-    writeDebugHTML(pub, server, port)
+    writeDebugHTML(pub, server, port, use)
 
 }
 function releaseOne({mode, dir}){

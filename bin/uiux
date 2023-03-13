@@ -59,6 +59,10 @@ var Services = {
                 v: ['branches', 0] //array means pass the option value to the function branchesFn's second argument, then send the result to the branches 
                 , msg: 'the remote name to pull, default is origin'
             }
+            , use: {
+                v: 'csv2arr'
+                , msg: 'port list dependencies'
+            }
         }
         , 'dir' //the last option to arguments of func above, which is no prefex double dash
         , ['repo', 'branches'] //mandatory option
@@ -132,7 +136,7 @@ function help(status, arg) {
     var cmd = path.basename(process.argv[1])
     switch(status){
         case 1: 
-            print('no valid service availalbe')
+            print('no valid service available')
             break
         case 2: 
             print('the service is not found: '+ arg)
@@ -230,7 +234,13 @@ var defaults = (arg)=>{
 // console.log(__dirname)
 var Invoker = {}
 var curSvc, curKey
-for (var i = 2; i < process.argv.length; ++i) {
+var arglen = process.argv.length 
+if (arglen <= 2) { 
+    print('no service available')
+    help(1) 
+}
+
+for (var i = 2; i < arglen; ++i) {
     var arg = process.argv[i];
     if(!service){
         if(i > 2) help(1)
