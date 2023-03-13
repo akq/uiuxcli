@@ -236,7 +236,6 @@ var Invoker = {}
 var curSvc, curKey
 var arglen = process.argv.length 
 if (arglen <= 2) { 
-    print('no service available')
     help(1) 
 }
 
