@@ -3,6 +3,7 @@ var DevServ = require('webpack-dev-server')
 var createCfg = require('../config/tmpl.config')
 var path = require('path')
 var fs = require('fs')
+var http = require('http')
 
 var {
     runCmd
@@ -344,17 +345,25 @@ function readDebugDomains(dir) {
     var file = j(dir, 'public', 'domain.js')
     if(fs.existsSync(file)){
         var content = fs.readFileSync(file)
-        var lines = content.toString().split('\n')
-        var ports = lines[1].substr('var port = '.length)
-        var obj = JSON.parse(ports)
-        return obj
+        return readDomainContent(content)
     }
+    return []
 }
-function writeDebugDomains(dir) {
+
+function readDomainContent(content) {
+    var lines = content.toString().split('\n')
+    var ports = lines[1].substr('var port = '.length)
+    var usingExt = lines[2].length > 0 
+    var obj = JSON.parse(ports)
+    return [obj, usingExt]
+}
+function writeDebugDomains(dir, ext) {
+    
     var content = `
 var port = ${JSON.stringify(domainPorts)}
-
-if(!window.__URLS__){
+`+ (ext?`port = Object.assign(port, ${JSON.stringify(ext)})
+`:'')
++`if(!window.__URLS__){
     window.__URLS__ = {}
 
     for(var i in port){
@@ -370,7 +379,7 @@ if(!window.__URLS__){
         fs.mkdirSync(j(dir, 'public'))
     fs.writeFileSync(j(dir, 'public', 'domain.js'), content)
 }
-function writeDebugHTML(dir, server, defPort) {
+function writeDebugHTML(dir, server, defPort, ext) {
     var list = []
     var port = domainPorts
     var debugUrl = 'http://localhost:'+defPort+'/debug.html'
@@ -454,6 +463,11 @@ function writeDebugHTML(dir, server, defPort) {
             ${list.join('\n')}
         </ul>
         <div id='time_sum'></div>
+        ${ext.map(x=>`<div>domains from <a href='http://localhost:${x}/domain.js'>http://localhost:${x}/</a></div><iframe src='http://localhost:${x}/debug.html' style="
+        width: 100vw;
+        height: 500px;
+        border: none;
+    "></iframe><br />\n`)}
         <script>
         var links = document.querySelectorAll('li > a')
         var cur2 = new Date()
@@ -546,18 +560,40 @@ async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=
     for(var ep of use){
         pros.push(new Promise((resolve, reject) =>{
             http.get('http://localhost:'+ep+'/domain.js', (res)=> {
-                resolve(res)
+                var rawData = ''
+                res.on('data', chunk => {
+                    rawData += chunk
+                })
+                
+                res.on('end', () => {
+                    if(rawData){
+                        var d = readDomainContent(rawData)
+                        resolve(d[0])
+                    }
+                    else resolve({})
+                })
+                
             })
         }))
     }
     var results = await Promise.all(pros)
-    var defPorts = readDebugDomains(pub)
+    
+    var [defPorts, usedExt] = readDebugDomains(pub)
+
+    for(var i = 1; i < results.length; i++){
+        for(var k in results[i]){
+            results[0][k] = results[i][k]
+        }
+    }
     var ver = 'latest'
     var exc = excludes.reduce((a,c)=>{
         a[c] = 1
         return a
     }, {})
     var portObj = {}
+    for(var i in results[0]){
+        portObj[results[0][i][ver]] = 1
+    }
     branches.forEach((x, i) => {
         if(exc[x]) return
         var cfg = getBranchCfg(x, base, repo, pull)
@@ -572,7 +608,8 @@ async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=
         var s = cmd.start(cfg, ver, dev , servers)
         if(!server) {server = s}
     })
-    if(!defPorts)writeDebugDomains(pub)
+    if(!defPorts || pros.length > 0 || (usedExt && pros.length === 0))
+        writeDebugDomains(pub, results?.[0])
     writeDebugHTML(pub, server, port, use)
 
 }
