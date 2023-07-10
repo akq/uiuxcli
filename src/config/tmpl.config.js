@@ -16,7 +16,14 @@ module.exports = (opt) => {
       return pluginFn[fn]?.(...x)
     }
   }) || []
-  var rules = rule?.map(x=> typeof x==='string'? ruleFn[x]?.(opt) : x) || []
+  var rules = rule?.map(x=> {
+    if(typeof x==='string') return ruleFn[x]?.()
+    if(Array.isArray(x)){
+      var fn = x.shift()
+      return ruleFn[fn]?.(...x)
+    }
+    return x
+  }) || []
   var ctx = path.join(__dirname, '../..')
   return {
     name: manifest.name,

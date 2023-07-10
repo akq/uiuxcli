@@ -23,6 +23,23 @@ exp.image = (opt)=>({
     test: /\.(gif|jpg|png|jpeg|ico)$/,
     use: use('url-loader')
 })
+exp.pdf = (opt)=>({
+    test: /\.pdf$/,
+    use: use('url-loader')
+})
+
+//Arrow functions do not have their own arguments object. Thus, in this example, arguments is a reference to the arguments of the enclosing scope
+exp.url = function(){
+    var args = [...arguments], exts
+    if(args.length > 1)
+        exts = '('+args.join('|')+')'
+    else exts = args[0]
+    return {
+        test: new RegExp('.'+exts+'$'),
+        use: use('url-loader')
+    }
+}
+
 exp.svg = (opt) => ({
     test: /\.svg$/,
     exclude: /node_modules/,

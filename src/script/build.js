@@ -459,6 +459,7 @@ function writeDebugHTML(dir, server, defPort, ext) {
         }
     }
     </script></head><body>
+    <div>domains from current repository: <a href='http://localhost:${defPort}'>http://localhost:${defPort}/</a></div>
         <ul>
             ${list.join('\n')}
         </ul>
