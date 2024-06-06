@@ -42,6 +42,9 @@ module.exports = (opt) => {
     experiments: {
       topLevelAwait: true
     },
+    resolve: {
+      extensions: [".js", ".jsx", ".tsx", ".ts"]
+    },
     module: {
       rules: [
         {

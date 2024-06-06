@@ -63,5 +63,11 @@ exp.svg = (opt) => ({
         }
     ]
 })
+exp.ts = (opt) => ({ 
+    test: /\.(ts|tsx)$/,
+    exclude: /node_modules/, 
+    use: "ts-loader"
+    
+})
 
 module.exports = exp
