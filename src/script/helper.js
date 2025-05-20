@@ -1,4 +1,5 @@
 var shell = require('shelljs')
+var path = require('path')
 
 function runCmd(dir, cmd) {
     shell.cd(dir)
@@ -28,26 +29,39 @@ var mapper = {
         }
         else return ret.stdout.trim()
     }
-    , branchesFn : (remote = 'origin', starter= 'master' ) => {
-        // runCmd(cwd, 'git fetch')
-        var ret = runCmd(cwd, 'git branch -r')
-        if(ret.code){
-            return [starter]
+    , branchesFn : (remote = 'origin', starter = '.', ...includes ) => {
+        var list 
+        if(includes.length > 0){
+            list = includes
         }
-        // var prefix = 'remotes/'+remote
-        var prefix = remote
-        var len = prefix.length +1
-        var out = ret.stdout.trim().split('\n')
-        var list = out.filter(x=>{
-            x = x.trim() 
-            return x.startsWith(prefix) 
-            && ! x.startsWith(prefix + '/HEAD')
-            && ! x.startsWith(prefix + '/!')
-            && x !== prefix + '/main' 
-            && x !== prefix + '/master' 
-            && x !== prefix + '/' + starter
-        }).map(x=>x.trim().substr(len))
+        else {
+            runCmd(cwd, 'git fetch --all')
+            var ret = runCmd(cwd, 'git branch -r')
+    
+            if(ret.code){
+                return [starter]
+            }
+            // var prefix = 'remotes/'+remote
+            var prefix = remote
+            var len = prefix.length +1
+            var out = ret.stdout.trim().split('\n')
+    
+            list = out.filter(x=>{
+                x = x.trim() 
+                return x.startsWith(prefix) 
+                && ! x.startsWith(prefix + '/HEAD')
+                && ! x.startsWith(prefix + '/!')
+                && x !== prefix + '/main' 
+                && x !== prefix + '/master' 
+                && x !== prefix + '/' + starter
+            }).map(x=>x.trim().substr(len))            
+        }
         list.unshift(starter)
+        list.forEach((x, i)=>{
+            if(x[0]==='.'){
+                list[i] = path.posix.join(mapper.currentBranch(), list[i])
+            }
+        })
         return list
     }
     , currentBranch: ()=>{

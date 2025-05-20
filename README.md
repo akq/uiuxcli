@@ -2,6 +2,23 @@
 The command line of uiux
 
 # Release Notes
+## 1.0.14
+1. if configured, the cli will not pull all branches from remote, but only from branches defined in uiDependenceis field 
+2. support . if using the same branch 
+3. remove the last parameter by default
+4. default **start** parameter set to the **.** (current branch)
+4. using name in package.json instead of branch name.
+
+e.g. the previous command
+
+```uiux dev --start demo/site --port 1235 --branches usr/tmpl_xyz ..```
+
+suppose the current working diretory is **demo/site**, the branches dependencies are written in the uiDependencies field of **demo/site/package.json**, then it can be simplified to the following commands
+
+```uiux dev --start . --port 1235 --branches + ```
+
+```uiux dev --port 1235 --branches + ```
+
 ## 1.0.13
 1. customize the rule block, use [] for the customization, 1st is the rule name, the rest is configuration
     ```js

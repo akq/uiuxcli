@@ -194,6 +194,7 @@ var cmd = {
         var compiler = Webpack(cfg0)
         compiler.run()
     }
+    //TODO
     , getTag(base, domain, ver) {
         var str = fs.readFileSync(j(base, 'master/domain', domain + '.json'))
         //TODO exception
@@ -553,12 +554,12 @@ function findAPort(obj, port){
         obj[port] = 1
     return port
 }
+
 async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=[], use=[] }) {
     var server, servers = {}
-    var pub = j(base, branches[0])
     
     var pros = []
-    for(var ep of use){
+    for(var ep of use){ //external ports
         pros.push(new Promise((resolve, reject) =>{
             http.get('http://localhost:'+ep+'/domain.js', (res)=> {
                 var rawData = ''
@@ -578,7 +579,9 @@ async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=
         }))
     }
     var results = await Promise.all(pros)
-    
+
+    var start = branches[0]
+    var pub = j(base, start)
     var [defPorts, usedExt] = readDebugDomains(pub)
 
     for(var i = 1; i < results.length; i++){
@@ -586,6 +589,20 @@ async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=
             results[0][k] = results[i][k]
         }
     }
+    var white = branches.includes('+')
+    // branches = branches.filter(item => item !== "+")
+    if(white){
+        //using uiDependencies
+        white = {}
+        var dir = j(base, branches[0])
+        var [deps] = cmd.getUiDeps(dir)
+        for(var i in deps){ 
+            var branch = i.split('_').join('/')
+            white[branch] = deps[i]
+            branches.push(branch)
+        }
+    }
+
     var ver = 'latest'
     var exc = excludes.reduce((a,c)=>{
         a[c] = 1
@@ -596,12 +613,14 @@ async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=
         portObj[results[0][i][ver]] = 1
     }
     branches.forEach((x, i) => {
+        if(x === '+') return        
+
         if(exc[x]) return
         var cfg = getBranchCfg(x, base, repo, pull)
         if(!cfg) return
 
         var dir = j(base, x)
-        var b = x.split('/').join('_')
+        var b = cfg.name //x.split('/').join('_')
         var p = !i ? port : findAPort(portObj, defPorts?.[b]?.[ver]) // (defPorts?.[b]?.[ver] || random(3000, 4000))
         setPort(b, [ver], p)
         var dev = { port: p, open: !i, public: j(dir , "public") }

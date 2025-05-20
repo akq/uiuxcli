@@ -45,7 +45,7 @@ var Services = {
             }
             , branches: {
                 v: 'csv2arr' //string means the function name in mapper
-                , msg: 'branches need to be built, in csv form, default is all branches in the origin, except those branches starts with ! '
+                , msg: 'branches need to be built, in csv form, default is all branches in the origin, except those branches starts with !, using + to get branches from uiDependcies'
             }
             , excludes: {
                 v: 'csv2arr' //string means the function name in mapper
@@ -183,10 +183,13 @@ function help(status, arg) {
     process.exit(status);
 }
 var cwd = process.cwd()
-
+var defaultDir = (branch) =>{
+    var rel = path.relative(branch, cwd)
+    return path.resolve(cwd, rel)
+}
 
 var defaults = (arg)=>{
-    var curRemote, repo, curBranch, branches = ['master']
+    var curRemote, repo, curBranch, branches = []
     if(arg === api.debug || arg === api.dev){
         try{
             curRemote = mapper.currentRemote()
@@ -203,13 +206,14 @@ var defaults = (arg)=>{
         case api.debug:
             return {
                 dir: cwd
-                , base: path.resolve(cwd, '..')
+                , base: defaultDir(curBranch)
                 , repo
                 , port: 1234
             }
         case api.dev: 
+            Invoker.branches = [curRemote, curBranch]
             return {
-                dir: repo? path.resolve(cwd, '..'): cwd
+                dir: repo? defaultDir(curBranch): cwd
                 , repo
                 , branches
                 , port: 1234
@@ -222,7 +226,7 @@ var defaults = (arg)=>{
             }
         case api.build: 
             return {
-                dir: repo? path.resolve(cwd, '..'): cwd
+                dir: repo? defaultDir(curBranch): cwd
                 , repo
                 , branch: curBranch
             }
@@ -298,7 +302,7 @@ for (var i = 2; i < arglen; ++i) {
 }
 
 if(service[2] && !obj[service[2]]){
-    obj[service[2]] = path.resolve(cwd, '.')
+    obj[service[2]] = defaultDir(mapper.currentBranch())//path.resolve(cwd, '.')
 }
 
 if(!curSvc){
@@ -309,7 +313,7 @@ if(key){
 }
 for(var i in Invoker){
     if(mapper[i+'Fn']){
-        obj[i] = obj[i] || mapper[i+'Fn'].apply(null, Invoker[i])
+        obj[i] = mapper[i+'Fn'].apply(null, Invoker[i].concat(obj[i] || []))
     }
 }
 if(Object.keys(obj).length > 0)
