@@ -70,5 +70,6 @@ module.exports = (opt) => {
       }),
       ...plugins
     ],
+    manifest
   }
 };

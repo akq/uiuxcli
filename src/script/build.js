@@ -9,6 +9,7 @@ var {
     runCmd
     , exitOrThrow
     , runOrThrow
+    , mapper
 } = require('./helper')
 
 // var { Worker } = require("worker_threads");
@@ -77,7 +78,7 @@ var cmd = {
         }
         var cfg = createCfg({
             dir
-            , manifest: { main, lock: deps, ...manifest, module }
+            , manifest: { main, lock: deps, ...manifest, module, origModules: origMods }
         })
         return cfg
     }
@@ -102,7 +103,7 @@ var cmd = {
         })
     }
     , start(cfg, version, dev, servers) {
-        var { name, ...cfg0 } = cfg
+        var { name, manifest,  ...cfg0 } = cfg
         var { port, open, public } = dev
         var compiler = Webpack(cfg0)
         var devServerOptions = {
@@ -187,6 +188,7 @@ var cmd = {
         //     console.log(`${name}@${version} : ${port}`)
         // })
         servers[port].server = server
+        servers[port].manifest = manifest
         return server
     }
     , build(cfg) {
@@ -380,115 +382,121 @@ var port = ${JSON.stringify(domainPorts)}
         fs.mkdirSync(j(dir, 'public'))
     fs.writeFileSync(j(dir, 'public', 'domain.js'), content)
 }
-function writeDebugHTML(dir, server, defPort, ext) {
+function writeDebugHTML(dir, server, defPort, ext, servers) {
     var list = []
     var port = domainPorts
     var debugUrl = 'http://localhost:'+defPort+'/debug.html'
-    for(var i in port){
-        for(var k in port[i]){
-            var p = port[i][k]
-            var url = 'http://localhost:'+ p
-            var stopBtn = p === defPort ? '': `<button onclick="action(this, '${p}')" id='toggle_${p}' disabled>stop</button>`
-            list.push(`<li style='color: green;'  id='_${p}'>${i}@${k}:<a href='${url}/remoteEntry.js' port='${p}'>${url}/remoteEntry.js</a> ${stopBtn} <button onclick="action(this, '${p}')" id='restart_${p}' disabled>restart</button>&nbsp;<span id="time_${p}"></span></li>`)
-        }
-    }
 
-    var content = `<html>    <head><script>
-    function timer(id, span){
-        var t = document.querySelector('#time_'+id)
-        if(t) t.textContent = span/1000 + 's'
-    }
-    function stop(id){
-        document.querySelector('#_'+id).style.color='red'
-        var tg = document.querySelector('#toggle_'+id)
-        if(tg){ 
-            tg.textContent  = 'start'
-            tg.disabled = false
-        }
-        document.querySelector('#restart_'+id).disabled = true
-    }    
-    function start(id){
-        document.querySelector('#_'+id).style.color='green'
-        var tg = document.querySelector('#toggle_'+id)
-        if(tg) {
-            tg.textContent  = 'stop'
-            tg.disabled = false
-        }
-        document.querySelector('#restart_'+id).disabled = false
-    }
-    function action(btn, id){
-        var type = btn.textContent
-        btn.disabled = true
-        
-        var pro = fetch('http://localhost:${defPort}/_/action/'+type+'/'+id);
-        if(id===${defPort}){
-            setTimeout(x=>window.close(), 1000)
-        }
-        else{
-            var cur = new Date()
-            pro.then(x=>{
-                switch(type){
-                case 'stop':
-                    var span = new Date() - cur
-                    stop(id)
-                    timer(id, span)
-                    break
-                case 'start':
-                    
-                    fetch('http://localhost:'+id+'/remoteEntry.js').then(x=>{
-                        var span = new Date() - cur
-                        start(id)
-                        timer(id, span)
-                    })
-                    .catch(x=> alert('can\\'t start port '+id))
-                    .finally(x=> btn.disabled = false)
-                    break
-                case 'restart': 
-                    document.querySelector('#toggle_'+id).disabled  = true
-                    fetch('http://localhost:'+id+'/remoteEntry.js')
-                    .catch(x=> alert('can\\'t restart port '+id))
-                    .finally(x=>{
-                        var span = new Date() - cur
-                        timer(id, span)
-                        document.querySelector('#toggle_'+id).disabled  = false
-                        btn.disabled = false
-                    })
-                }
-            }).finally(x=>{
-                if(type==='stop') btn.disabled = false
-            })
-        }
-    }
-    </script></head><body>
-    <div>domains from current repository: <a href='http://localhost:${defPort}'>http://localhost:${defPort}/</a></div>
+    var repoUrl = mapper.repoFn()//runCmd(dir, 'git config --get remote.origin.url')
+
+
+    var headerHtml = `
+    <div class="tree-panel">
         <ul>
-            ${list.join('\n')}
+        <li>Repository: <a href="${repoUrl}" target="_blank">${repoUrl}</a></li>
         </ul>
-        <div id='time_sum'></div>
-        ${ext.map(x=>`<div>domains from <a href='http://localhost:${x}/domain.js'>http://localhost:${x}/</a></div><iframe src='http://localhost:${x}/debug.html' style="
+    </div>
+    `
+
+    for (var i in port) {
+        for (var k in port[i]) {
+            var p = port[i][k]
+            var {manifest: {origModules: module, name: domainName}, branch} = servers[p]
+            var url = 'http://localhost:' + p
+            var clist = [], branchUrl
+            for(var m in module){
+                var urls = getGitLabFileUrls(repoUrl, branch, module[m])
+                var blobUrl = urls.blobUrl + '.js'
+                if(!branchUrl) branchUrl = urls.branchUrl
+                if(module[m][0] !== '.') blobUrl = 'https://www.npmjs.com/package/'+ module[m]
+                clist.push(`<li>${domainName+'://'+path.basename(m)} => <a href='${blobUrl}' target='_blank'>${branch}: ${module[m]}</a></li>`)
+            }
+            
+            var componentList = clist.length
+                ? `<ul class="components">` + clist.join('') + `</ul>`
+                : '';
+            var stopBtn = p === defPort ? '' :
+                `<button class="btn stop" onclick="action(this, '${p}')" id='toggle_${p}' disabled>Stop</button>`
+            var restartBtn =
+                `<button class="btn restart" onclick="action(this, '${p}')" id='restart_${p}' disabled>Restart</button>`
+            list.push(`
+                <li class='service-item' id='_${p}'>
+                <div class='info'>
+                    <strong>${i}@${k}</strong>:
+                    <a href='${url}' target='_blank'>${url}</a>  |
+                    <a href='${url}/remoteEntry.js' port='${p}' target='_blank'>remoteEntry.js</a>  |
+                    <a href='${branchUrl}'target='_blank'>source</a>
+
+                    <span id="time_${p}" class="timestamp"></span>
+                </div>
+                <div class='actions'>
+                    ${stopBtn}
+                    ${restartBtn}
+                </div>
+                ${componentList}
+                </li>
+            `)
+        }
+    }
+    
+
+    var extstring = ext.map(x=>
+        `<div>domains from <a href='http://localhost:${x}/domain.js'>http://localhost:${x}/</a></div><iframe
+        src='http://localhost:${x}/debug.html' style="
         width: 100vw;
         height: 500px;
         border: none;
-    "></iframe><br />\n`)}
-        <script>
-        var links = document.querySelectorAll('li > a')
-        var cur2 = new Date()
-        for(let a of links){
-            fetch(a.href).then(x=>{
-                var tg = document.querySelector('#toggle_' + a.port)
-                if(tg) tg.disabled  = false
-                start(a.port)
-            }).catch(x=>{
-                stop(a.port)
-            }).finally(x=>{
-                timer('sum', new Date()-cur2)
-            })
-        }
-        </script>
-        </body></html>`
+    "></iframe><br />\n`) || ''
+
+    var templatePath = path.resolve(__dirname, 'debug.tmpl.html')
+    var template = fs.readFileSync(templatePath, 'utf-8')
+
+    var content = template
+    .replace('{{HEADER_HTML}}', headerHtml)
+    .replace('{{LIST_HTML}}', list.join('\n'))
+    .replace('{{EXT_HTML}}', extstring)
+    .replaceAll('{{DEF_PORT}}', defPort)
+
     fs.writeFileSync(j(dir, 'public', 'debug.html'), content)
     // debugger
     server.openBrowser(debugUrl)
+}
+
+function getGitLabFileUrls(repoUrl, branch, filePath) {
+  // Normalize repo URL
+  repoUrl = repoUrl.replace(/\.git$/, '').replace(/\/$/, '');
+
+  // Clean up filePath
+  var cleanedPath = '';
+  if (filePath && filePath.trim()) {
+    cleanedPath = filePath
+      .replace(/^\.\/+/, '')   // Remove leading ./
+      .replace(/^\/+/, '')     // Remove leading /
+      .replace(/\/+$/, '')     // Remove trailing /
+      .trim();
+  }
+
+  // If no file path → branch homepage
+  if (!cleanedPath) {
+    var branchUrl = repoUrl + '/-/tree/' + branch;
+    return {
+      branchUrl: branchUrl,
+      blobUrl: null,
+      rawUrl: null
+    };
+  }
+
+  // Encode path parts
+  var encodedPath = cleanedPath
+    .split('/')
+    .map(function(part) { return encodeURIComponent(part); })
+    .join('/');
+
+  return {
+    branchUrl: repoUrl + '/-/tree/' + branch,
+    blobUrl: repoUrl + '/-/blob/' + branch + '/' + encodedPath,
+    rawUrl: repoUrl + '/-/raw/' + branch + '/' + encodedPath
+  };
 }
 
 //debug from release repo
@@ -624,13 +632,18 @@ async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=
         var p = !i ? port : findAPort(portObj, defPorts?.[b]?.[ver]) // (defPorts?.[b]?.[ver] || random(3000, 4000))
         setPort(b, [ver], p)
         var dev = { port: p, open: !i, public: j(dir , "public") }
-        servers[p] = {dir, dev, version: ver}
+        servers[p] = {dir, dev, version: ver, branch: x}
         var s = cmd.start(cfg, ver, dev , servers)
         if(!server) {server = s}
     })
-    if(!defPorts || pros.length > 0 || (usedExt && pros.length === 0))
+    if(!defPorts || pros.length > 0 || (usedExt && pros.length === 0)){
         writeDebugDomains(pub, results?.[0])
-    writeDebugHTML(pub, server, port, use)
+        for(var i in servers){
+            var svr = servers[i]
+            writeDebugDomains(svr.dir, results?.[0])
+        }
+    }
+    writeDebugHTML(pub, server, port, use, servers)
 
 }
 function releaseOne({mode, dir}){

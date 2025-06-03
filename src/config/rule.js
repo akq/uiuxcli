@@ -43,24 +43,14 @@ exp.url = function(){
 exp.svg = (opt) => ({
     test: /\.svg$/,
     exclude: /node_modules/,
-    use: [
-        {
-            loader: use('babel-loader'),
-            options: {
-                presets: [use('@babel/preset-react')],
-                // context: ctx 
-              }
+    use: [    
+    {
+        loader: '@svgr/webpack',
+        options: {
+            icon: true, 
+            exportType: 'named', 
         },
-        {
-            loader: use('react-svg-loader'),
-            options: {
-                svgo: {
-                    plugins: [{ removeTitle: false }],
-                    floatPrecision: 2
-                },
-                jsx: true
-            }
-        }
+    }
     ]
 })
 

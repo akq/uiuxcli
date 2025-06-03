@@ -1,0 +1,213 @@
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        ul {
+            padding: 0;
+            margin: 0;
+            list-style: none;
+        }
+
+        .service-item {
+            border: 1px solid #ddd;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            background-color: #fff;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+        }
+
+        .service-item .info {
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .service-item a {
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        .service-item a:hover {
+            text-decoration: underline;
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        .btn.stop {
+            background-color: #f44336;
+            color: white;
+        }
+
+        .btn.restart {
+            background-color: #4caf50;
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .timestamp {
+            font-size: 0.85em;
+            color: #666;
+        }
+
+        .tree-panel ul {
+            list-style-type: none;
+            padding-left: 1em;
+            
+            margin-bottom: 16px;
+        }
+
+        .tree-panel li {
+            position: relative;
+            line-height: 1.8;
+            margin-bottom: 4px;
+        }
+
+        .tree-panel li::before {
+            content: '⚬';
+            position: absolute;
+            left: -0.6em;
+            color: #888;
+        }
+
+        .tree-panel a {
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        .tree-panel a:hover {
+            text-decoration: underline;
+        }
+        .components {
+            margin: 6px 0 0 20px;
+            padding-left: 16px;
+            list-style-type: disc;
+            color: #555;
+        }
+
+        .components li {
+            font-size: 0.9em;
+        }
+    </style>
+    <script>
+        function timer(id, span) {
+            var t = document.querySelector('#time_' + id)
+            if (t) t.textContent = span?(span / 1000 + 's'): ''
+        }
+        function stop(id) {
+            document.querySelector('#_' + id).style.color = 'red'
+            var tg = document.querySelector('#toggle_' + id)
+            if (tg) {
+                tg.textContent = 'start'
+                tg.disabled = false
+            }
+            document.querySelector('#restart_' + id).disabled = true
+        }
+        function start(id) {
+            document.querySelector('#_' + id).style.color = 'green'
+            var tg = document.querySelector('#toggle_' + id)
+            if (tg) {
+                tg.textContent = 'stop'
+                tg.disabled = false
+            }
+            document.querySelector('#restart_' + id).disabled = false
+        }
+        function action(btn, id) {
+            var type = btn.textContent
+            btn.disabled = true
+
+            var pro = fetch('http://localhost:{{DEF_PORT}}_/action/' + type + '/' + id);
+            if (id === {{DEF_PORT}}) {
+                setTimeout(x => window.close(), 1000)
+            }
+            else {
+            var cur = new Date()
+            pro.then(x => {
+                switch (type) {
+                    case 'stop':
+                        var span = new Date() - cur
+                        stop(id)
+                        timer(id, span)
+                        break
+                    case 'start':
+
+                        fetch('http://localhost:' + id + '/remoteEntry.js').then(x => {
+                            var span = new Date() - cur
+                            start(id)
+                            timer(id, span)
+                        })
+                            .catch(x => alert('can\'t start port ' + id))
+                            .finally(x => btn.disabled = false)
+                        break
+                    case 'restart':
+                        document.querySelector('#toggle_' + id).disabled = true
+                        timer(id)
+                        fetch('http://localhost:' + id + '/remoteEntry.js')
+                            .catch(x => alert('can\'t restart port ' + id))
+                            .finally(x => {
+                                var span = new Date() - cur
+                                timer(id, span)
+                                document.querySelector('#toggle_' + id).disabled = false
+                                btn.disabled = false
+                            })
+                }
+            }).finally(x => {
+                if (type === 'stop') btn.disabled = false
+            })
+        }
+        }
+    </script>
+</head>
+
+<body>
+    {{HEADER_HTML}}
+    <ul style="margin-left: 30px ;">
+    {{LIST_HTML}}
+    </ul>
+    <div id='time_sum'></div>
+    <!--ext-->
+    <script>
+        var links = document.querySelectorAll('a[port]')
+        var cur2 = new Date()
+        for (let a of links) {
+            fetch(a.href).then(x => {
+                var tg = document.querySelector('#toggle_' + a.port)
+                if (tg) tg.disabled = false
+                start(a.port)
+            }).catch(x => {
+                stop(a.port)
+            }).finally(x => {
+                timer('sum', new Date() - cur2)
+                timer(a.port, new Date() - cur2)
+            })
+        }
+    </script>
+</body>
+
+</html>

@@ -2,6 +2,10 @@
 The command line of uiux
 
 # Release Notes
+## 1.1.0
+1. switch to @svgr/webpack
+2. debug.html rewrite
+
 ## 1.0.14
 1. if configured, the cli will not pull all branches from remote, but only from branches defined in uiDependenceis field 
 2. support . if using the same branch 

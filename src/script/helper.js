@@ -35,7 +35,7 @@ var mapper = {
             list = includes
         }
         else {
-            runCmd(cwd, 'git fetch --all')
+            runCmd(cwd, 'git remote prune origin')
             var ret = runCmd(cwd, 'git branch -r')
     
             if(ret.code){
