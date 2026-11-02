@@ -4,6 +4,7 @@ var createCfg = require('../config/tmpl.config')
 var path = require('path')
 var fs = require('fs')
 var http = require('http')
+var watchConfig = require('./watch-config')
 
 var {
     runCmd
@@ -22,6 +23,13 @@ var {
 
 
 var j = path.join
+function queueServerOperation(entry, operation) {
+    var pending = entry.operation || Promise.resolve()
+    var result = pending.then(operation, operation)
+    entry.operation = result
+    return result
+}
+
 function logStart(name, version, port) {
     console.log()
     console.log(`${name}@${version} : ${port}`)
@@ -55,13 +63,12 @@ var cmd = {
     }
     , getUiDeps(dir) {
         try {
+            delete require.cache[require.resolve(j(dir, './package.json'))]
             var pkg = require(j(dir, './package.json'))
             return [pkg.uiDependencies, pkg.main]
         }
         catch (e) {
-            throw {
-                msg: 'package.json is not found in the folder: ' + dir
-            }
+            throw new Error('Unable to read package.json in ' + dir, { cause: e })
         }
     }
     , prepare(dir, main, deps) {
@@ -84,22 +91,25 @@ var cmd = {
     }
     // , async start(opts, ctx){
     , releaseSingle(cfg){
-        var {name, ...cfg0} = cfg
+        var {name, manifest, ...cfg0} = cfg
         // cfg0.mode = "production"
         var compiler = Webpack(cfg0)
         console.log('start to compile '+ name)
-        compiler.run((err, stats) => {
-            if (err) {
-                console.log(JSON.stringify(err))
-            }
-            console.log( JSON.stringify(stats.toJson({ all: false, warnings: true, errors: true })))
-            compiler.close((closeErr) => {
-                if(closeErr)
-                    console.log(name, 'compiled with error', closeErr)
-                else{
-                    console.log(name, 'compiled successfully')
+        return new Promise((resolve) => {
+            compiler.run((err, stats) => {
+                if (err) {
+                    console.log(JSON.stringify(err))
                 }
-            });
+                console.log( JSON.stringify(stats.toJson({ all: false, warnings: true, errors: true })))
+                compiler.close((closeErr) => {
+                    if(closeErr)
+                        console.log(name, 'compiled with error', closeErr)
+                    else{
+                        console.log(name, 'compiled successfully')
+                    }
+                    resolve()
+                });
+            })
         })
     }
     , start(cfg, version, dev, servers) {
@@ -107,7 +117,9 @@ var cmd = {
         var { port, open, public } = dev
         var compiler = Webpack(cfg0)
         var devServerOptions = {
-            port, open
+            port, open: dev.reloading ? false : open
+            , hot: false
+            , liveReload: true
             , ...cfg0.devServer
             // static is v4 option
             , static: {
@@ -122,6 +134,25 @@ var cmd = {
             }
 
         }
+        if (dev.reloading) devServerOptions.open = false
+
+        var compiled = false
+        compiler.hooks.done.tap('UiuxLiveReload', (stats) => {
+            if (stats.hasErrors()) return
+            var notify = compiled || servers[port].reloadAfterCompile
+            compiled = true
+            servers[port].reloadAfterCompile = false
+            if (!notify) return
+            // Federated consumers have their own websocket, not the remote's.
+            setImmediate(() => {
+                for (var id in servers) {
+                    var target = servers[id].server
+                    if (target?.options.liveReload && target.webSocketServer) {
+                        target.sendMessage(target.webSocketServer.clients, 'static-changed', name)
+                    }
+                }
+            })
+        })
 
         if(open){
             devServerOptions.setupMiddlewares = (middlewares, svr) => {
@@ -135,42 +166,48 @@ var cmd = {
                     var { params: { id, type } } = req
                     if(!servers[id]){
                         console.log(id+' is not listening')
-                        return
+                        return res.status(404).send({x:'server not found'})
                     }
-                    console.log('-----------'+type+'--------------')
-                    var {version, server: sv, dir, dev} = servers[id]
-                    var cfg = getCfg(dir)
-                    if(!cfg){
-                        return res.status(500).send({x:'cfg error'})
-                    }
-                    var {name} = cfg
-                    if(type === 'stop' || type === 'restart'){
-                        var m1 = `Stopping ${name}@${version} at port ${id}`
-                        var m2 = `Terminated ${name}@${version} at port ${id}`
-                        var running = !!sv.server
-                        if(running){ //stop, restart
-                            console.log(m1)
-                            await sv.stop()
-                            console.log(m2)
+                    return queueServerOperation(servers[id], async () => {
+                        console.log('-----------'+type+'--------------')
+                        await servers[id].ready
+                        var {version, server: sv, dir, dev} = servers[id]
+                        var cfg = getCfg(dir)
+                        if(!cfg){
+                            return res.status(500).send({x:'cfg error'})
                         }
-                        if(type === 'stop'){
-                            return res.send(running? m2: m1)
+                        var {name} = cfg
+                        if(type === 'stop' || type === 'restart'){
+                            var m1 = `Stopping ${name}@${version} at port ${id}`
+                            var m2 = `Terminated ${name}@${version} at port ${id}`
+                            var running = !!sv.server
+                            if(running){ //stop, restart
+                                console.log(m1)
+                                await sv.stop()
+                                console.log(m2)
+                            }
+                            if(type === 'stop'){
+                                return res.send(running? m2: m1)
+                            }
                         }
-                    }
-                    if(type === 'start' || type === 'restart'){
-                        var m3 = `Starting ${name}@${version} at port ${id}`
-                        var m4 = `Running ${name}@${version} at port ${id}`
-                        var stopped = !sv.server
-                        if(stopped){ //stop, restart
-                            console.log(m3)
-                            // await sv.start()
-                            cmd.start(cfg, version, dev, servers )
-                            console.log(m4)
-                            logStart(name, version, id)
+                        if(type === 'start' || type === 'restart'){
+                            var m3 = `Starting ${name}@${version} at port ${id}`
+                            var m4 = `Running ${name}@${version} at port ${id}`
+                            var stopped = !sv.server
+                            if(stopped){ //stop, restart
+                                console.log(m3)
+                                servers[id].reloadAfterCompile = true
+                                cmd.start(cfg, version, { ...dev, reloading: true }, servers )
+                                await servers[id].ready
+                                console.log(m4)
+                            }
+                            return res.send(stopped? m4: m3)
                         }
-                        return res.send(stopped? m4: m3)
-                    }
-
+                        return res.status(400).send({x:'unknown action'})
+                    }).catch(error => {
+                        console.error(`Server action ${type} failed on ${id}:`, error)
+                        res.status(500).send({x: error.message})
+                    })
                 });
                 return middlewares
             }
@@ -181,7 +218,8 @@ var cmd = {
         // await server.start()
         //v4 uses start
         // .then(x=>{
-        server.start().then(x=>logStart(name, version, port))
+        servers[port].ready = server.start().then(() => logStart(name, version, port))
+        servers[port].ready.catch(error => console.error(`Failed to start ${name} on ${port}:`, error))
         // })
         // var server = new DevServ(compiler, devServerOptions)
         // server.listen(port, 'localhost', (x)=>{
@@ -634,6 +672,29 @@ async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=
         var dev = { port: p, open: !i, public: j(dir , "public") }
         servers[p] = {dir, dev, version: ver, branch: x}
         var s = cmd.start(cfg, ver, dev , servers)
+        servers[p].closeConfigWatcher = watchConfig(dir, () => queueServerOperation(servers[p], async () => {
+            var entry = servers[p]
+            var next = getCfg(dir)
+            if (!next) throw new Error(`Invalid configuration in ${dir}; fix it and save again.`)
+            if (next.name !== entry.manifest.name) {
+                throw new Error('Changing the module name requires restarting uiux dev.')
+            }
+            var { name, manifest, ...options } = next
+            Webpack.validate(options)
+            Webpack.validateSchema(require('webpack-dev-server/lib/options.json'), next.devServer || {}, {
+                name: 'Dev Server'
+            })
+            if (next.devServer?.port !== undefined && next.devServer.port !== p) {
+                throw new Error('Changing the dev-server port requires restarting uiux dev.')
+            }
+            await entry.ready
+            if (!entry.server.server?.listening) return
+            console.log(`Configuration changed: rebuilding ${next.name} on ${p}`)
+            await entry.server.stop()
+            entry.reloadAfterCompile = true
+            cmd.start(next, ver, { ...dev, reloading: true }, servers)
+            await entry.ready
+        }), error => console.error(`Configuration reload failed for ${dir}:`, error))
         if(!server) {server = s}
     })
     if(!defPorts || pros.length > 0 || (usedExt && pros.length === 0)){
@@ -646,7 +707,11 @@ async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=
     writeDebugHTML(pub, server, port, use, servers)
 
 }
-function releaseOne({mode, dir}){
+async function releaseOne(opt){
+    if(opt.out){
+        return coreAllRelease(opt)
+    }
+    var {mode, dir} = opt
     cmd.yarn(dir)
     var cfg = getCfg(dir)
     if(!cfg) {
@@ -655,16 +720,260 @@ function releaseOne({mode, dir}){
     }
     if(mode && !['dev', 'develop', 'development'].includes(cfg.mode.toLowerCase())) 
         cfg.mode = 'production'
-    cmd.releaseSingle(cfg)
+    await cmd.releaseSingle(cfg)
+    if(opt.serve)
+        serveStatic(cfg.output.path, opt.serve)
 }
-function coreAllRelease({ dir: base, repo, branches, port, pull = '' }) {
-    branches.forEach((x, i) => {
+// Build several branches into one output root, using the directory structure
+// as the cross-module reference (the dev command uses ports instead).
+// Every branch is emitted to `out/<branch>`, and the root gets a domain.js
+// (module name -> /<branch>), an aggregated ref.js, a manifest.json listing
+// every site and an index.html navigation hub.
+async function coreAllRelease(opt){
+    var base = opt.base || opt.dir
+    var repo = opt.repo
+    var pull = opt.pull || ''
+    var mode = opt.mode
+    var out = opt.out
+    var excludes = opt.excludes || []
+    var branches = (opt.branches && opt.branches.length)
+        ? opt.branches.slice()
+        : mapper.branchesFn(opt.remote || 'origin', opt.start || '.')
+
+    var outRoot = path.isAbsolute(out) ? out : j(base, out)
+    if(!fs.existsSync(outRoot))
+        fs.mkdirSync(outRoot, { recursive: true })
+
+    var exc = excludes.reduce((a, c) => { a[c] = 1; return a }, {})
+
+    if(branches.includes('+')){
+        // pull extra branches from the start branch uiDependencies
+        var dir0 = j(base, branches[0])
+        var [deps] = cmd.getUiDeps(dir0)
+        for(var k in deps)
+            branches.push(k.split('_').join('/'))
+    }
+
+    var built = []
+    for(var i = 0; i < branches.length; i++){
+        var x = branches[i]
+        if(x === '+' || exc[x]) continue
         var cfg = getBranchCfg(x, base, repo, pull)
-        if(!cfg) return
-        cmd.releaseSingle(cfg)
+        if(!cfg) continue
+        if(mode && !['dev', 'develop', 'development'].includes((cfg.mode || '').toLowerCase()))
+            cfg.mode = 'production'
+        var outDir = j(outRoot, x)
+        cfg.output = { ...cfg.output, path: outDir }
+        built.push({ name: cfg.name, branch: x, outDir, src: j(base, x), pkg: readPkg(j(base, x)) })
+        await cmd.releaseSingle(cfg)
+    }
+
+    writeReleaseRefs(outRoot, built)
+    writeReleaseManifest(outRoot, built)
+    writeReleaseIndex(outRoot)
+    console.log('\nAll branches released under ' + outRoot)
+    if(opt.serve)
+        serveStatic(outRoot, opt.serve)
+}
+function readPkg(dir){
+    try{
+        var p = j(dir, 'package.json')
+        delete require.cache[require.resolve(p)]
+        return require(p)
+    }
+    catch(e){ return {} }
+}
+// Write the cross-module reference at the output root. Every branch's built
+// index.html loads the absolute /domain.js and /ref.js, so the references live
+// at the root: domain.js maps each module name to its absolute /<branch> dir
+// (the loader appends /remoteEntry.js), and ref.js aggregates the external
+// template URLs each branch ships in its own public/ref.js.
+function writeReleaseRefs(outRoot, built){
+    if(!built.length) return
+    var ref = {}
+    built.forEach(b => {
+        var url = '/' + b.branch
+        ref[b.name] = url
+        ref[b.name + '@latest'] = url
     })
-    // var pub = j(base, branches[0])
-    // writeDebugDomains(pub)
+    var domain = `
+window.__URLS__ = window.__URLS__ || {}
+;(function(){
+  var ref = ${JSON.stringify(ref, null, 2)}
+  for(var k in ref){ window.__URLS__[k] = ref[k] }
+})()
+`
+    fs.writeFileSync(j(outRoot, 'domain.js'), domain)
+    console.log('Wrote domain.js to ' + j(outRoot, 'domain.js'))
+
+    var seen = {}, parts = []
+    built.forEach(b => {
+        var f = j(b.src, 'public', 'ref.js')
+        if(!fs.existsSync(f)) return
+        var body = fs.readFileSync(f).toString().trim()
+        // dedupe by content: every branch usually ships the same external
+        // template URLs, so identical ref.js files are merged into one block
+        if(!body || seen[body]) return
+        seen[body] = 1
+        parts.push('/* ' + b.branch + ' */\n' + body)
+    })
+    var refJs = parts.length ? parts.join('\n') : ''
+    if(refJs){
+        fs.writeFileSync(j(outRoot, 'ref.js'), refJs)
+        console.log('Wrote ref.js to ' + j(outRoot, 'ref.js'))
+    }
+
+    // keep every branch folder's domain.js/ref.js identical to the root ones,
+    // so each folder is self-consistent with the external references
+    built.forEach(b => {
+        fs.writeFileSync(j(b.outDir, 'domain.js'), domain)
+        if(refJs) fs.writeFileSync(j(b.outDir, 'ref.js'), refJs)
+    })
+}
+// Write a manifest.json describing every released site, following the
+// playground sites/manifest.json shape.
+function writeReleaseManifest(outRoot, built){
+    var manifest = {
+        title: 'UIUX Sites'
+        , description: 'Site navigation hub for the released branches.'
+        , sites: built.map(b => ({
+            id: b.name
+            , name: b.pkg.name || b.name
+            , description: b.pkg.description || ''
+            , version: b.pkg.version || ''
+            , path: b.branch + '/'
+            , tags: []
+        }))
+    }
+    fs.writeFileSync(j(outRoot, 'manifest.json'), JSON.stringify(manifest, null, 2))
+    console.log('Wrote manifest.json to ' + j(outRoot, 'manifest.json'))
+}
+// Write the navigation hub index.html at the output root. It fetches
+// manifest.json and renders a card per released site.
+function writeReleaseIndex(outRoot){
+    var html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Site Navigation</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f5f6f8; color: #1f2328; }
+    header { padding: 48px 24px 24px; max-width: 960px; margin: 0 auto; }
+    header h1 { margin: 0 0 8px; font-size: 28px; }
+    header p { margin: 0; color: #57606a; }
+    main { max-width: 960px; margin: 0 auto; padding: 16px 24px 64px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
+    .card { display: flex; flex-direction: column; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; padding: 20px; text-decoration: none; color: inherit; transition: box-shadow .15s ease, transform .15s ease; }
+    .card:hover { box-shadow: 0 6px 20px rgba(0,0,0,.08); transform: translateY(-2px); }
+    .card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .card-head img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; }
+    .card h2 { margin: 0; font-size: 18px; }
+    .card p { margin: 0; color: #57606a; font-size: 14px; line-height: 1.5; }
+    .tags { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .tag { font-size: 12px; background: #eaeef2; color: #57606a; border-radius: 999px; padding: 2px 10px; }
+    .empty { color: #57606a; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="title">Site Navigation</h1>
+    <p id="subtitle"></p>
+  </header>
+  <main>
+    <div id="grid" class="grid"></div>
+  </main>
+  <script>
+    fetch('manifest.json')
+      .then(function (r) { return r.json(); })
+      .then(function (m) {
+        document.getElementById('title').textContent = m.title || 'Site Navigation';
+        document.getElementById('subtitle').textContent = m.description || '';
+        var grid = document.getElementById('grid');
+        var sites = (m.sites || []);
+        if (!sites.length) { grid.innerHTML = '<p class="empty">No sites available.</p>'; return; }
+        sites.forEach(function (s) {
+          var a = document.createElement('a');
+          a.className = 'card';
+          a.href = s.path;
+          var thumb = s.thumbnail ? '<img src="' + s.thumbnail + '" alt="" />' : '';
+          var tags = (s.tags || []).map(function (t) { return '<span class="tag">' + t + '</span>'; }).join('');
+          a.innerHTML = '<div class="card-head">' + thumb + '<h2></h2></div>' + '<p class="desc"></p>' + (tags ? '<div class="tags">' + tags + '</div>' : '');
+          a.querySelector('h2').textContent = s.name || s.id;
+          a.querySelector('.desc').textContent = s.description || '';
+          grid.appendChild(a);
+        });
+      })
+      .catch(function () { document.getElementById('grid').innerHTML = '<p class="empty">Failed to load site manifest.</p>'; });
+  </script>
+</body>
+</html>
+`
+    fs.writeFileSync(j(outRoot, 'index.html'), html)
+    console.log('Wrote index.html to ' + j(outRoot, 'index.html'))
+}
+// Serve a build output directory over http so the release can be verified in a
+// browser. Plain static file server: the directory is the web root, so the
+// absolute /domain.js, /ref.js and /<branch> references resolve as deployed.
+var MIME = {
+    '.html': 'text/html; charset=utf-8'
+    , '.js': 'text/javascript; charset=utf-8'
+    , '.mjs': 'text/javascript; charset=utf-8'
+    , '.css': 'text/css; charset=utf-8'
+    , '.json': 'application/json; charset=utf-8'
+    , '.map': 'application/json; charset=utf-8'
+    , '.svg': 'image/svg+xml'
+    , '.png': 'image/png'
+    , '.jpg': 'image/jpeg'
+    , '.jpeg': 'image/jpeg'
+    , '.gif': 'image/gif'
+    , '.webp': 'image/webp'
+    , '.ico': 'image/x-icon'
+    , '.wasm': 'application/wasm'
+    , '.woff': 'font/woff'
+    , '.woff2': 'font/woff2'
+    , '.ttf': 'font/ttf'
+    , '.txt': 'text/plain; charset=utf-8'
+    , '.pdf': 'application/pdf'
+}
+function serveStatic(root, port){
+    port = parseInt(port, 10) || 8080
+    if(!fs.existsSync(root)){
+        console.log('The directory to serve does not exist: ' + root)
+        return
+    }
+
+    var server = http.createServer((req, res) => {
+        var urlPath = decodeURIComponent(req.url.split('?')[0])
+        var rel = path.normalize(urlPath).replace(/^(\.\.[/\\])+/, '')
+        var file = j(root, rel)
+        // keep the request inside the served root
+        if(path.relative(root, file).startsWith('..')){
+            res.statusCode = 403
+            return res.end('Forbidden')
+        }
+        fs.stat(file, (err, stat) => {
+            if(!err && stat.isDirectory()){
+                file = j(file, 'index.html')
+            }
+            fs.readFile(file, (e, data) => {
+                if(e){
+                    res.statusCode = 404
+                    return res.end('Not found: ' + urlPath)
+                }
+                res.setHeader('Content-Type', MIME[path.extname(file).toLowerCase()] || 'application/octet-stream')
+                res.setHeader('Access-Control-Allow-Origin', '*')
+                res.end(data)
+            })
+        })
+    })
+    server.listen(port, () => {
+        console.log('\nServing ' + root)
+        console.log('  http://localhost:' + port + '/')
+    })
+    return server
 }
 
 module.exports = {

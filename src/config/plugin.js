@@ -5,10 +5,11 @@ var exp = {}
 exp.html = (opt) => new HtmlWebpackPlugin({
     template: path.join(opt.dir, opt?.config?.html || "./public/index.html"),
 })
-exp.copy = () => new CopyPlugin({
+exp.copy = (opt) => new CopyPlugin({
     patterns: [
         {
-            from: "public",
+            from: path.join(opt.dir, "public"),
+            to: ".",
             globOptions: {
                 ignore: ["**/index.html"],
             },

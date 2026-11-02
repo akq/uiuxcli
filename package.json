@@ -1,6 +1,6 @@
 {
   "name": "uiuxcli",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "The command line of uiux",
   "dependencies": {
     "@babel/core": "7.15.0",
@@ -17,7 +17,6 @@
     "sass-loader": "^10.1.1",
     "shelljs": "^0.8.5",
     "style-loader": "3.2.1",
-    "uiuxloader": "^2.0.3",
     "uiuxtest": "^1.0.4",
     "url-loader": "^4.1.1",
     "webpack": "5.99.8",

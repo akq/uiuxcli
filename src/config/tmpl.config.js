@@ -1,5 +1,5 @@
 var path = require('path')
-var UiuxLoaderPlugin = require("uiuxloader")
+var UiuxLoaderPlugin = require("../loader/loader")
 var pluginFn = require('./plugin')
 var ruleFn = require('./rule')
 var use = require.resolve

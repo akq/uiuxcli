@@ -105,6 +105,40 @@ var Services = {
                 , msg: 'the release mode, production or development, development for not specifying this option or using dev, develop, development'
                 , eg: ['-', 'dev', 'develop', 'development', 'prod','production', ]
             }
+            , out: {
+                v: 1
+                , msg: 'output root for a multi-branch release. When set, build runs like dev but references modules by directory instead of port: every branch is emitted to <root>/<branch> and the root gets domain.js, ref.js, a manifest.json and an index.html navigation hub, e.g. .build'
+                , eg: ['.build']
+            }
+            , serve: {
+                v: 1
+                , msg: 'after building, serve the output over http on the given port to verify the result (the output root is the web root), e.g. --serve 8123'
+                , eg: ['8123']
+            }
+            , repo: {
+                v: 1
+                , msg: 'the repo url for multi-branch release, default is the current origin'
+            }
+            , pull: {
+                v: 1
+                , msg: 'the flag to pull the latest codes when releasing, all or a csv list of branches, default is false'
+            }
+            , branches: {
+                v: 'csv2arr'
+                , msg: 'branches to release in csv form (multi-branch mode), default is all branches in the origin, use + to add branches from uiDependencies'
+            }
+            , excludes: {
+                v: 'csv2arr'
+                , msg: 'branches to exclude from a multi-branch release, in csv form'
+            }
+            , start: {
+                v: 1
+                , msg: 'the start branch listed first in the navigation hub, default is the current branch'
+            }
+            , remote: {
+                v: 1
+                , msg: 'the remote name used to resolve branches, default is origin'
+            }
         }
         , 'dir' //the last option to arguments of func above, which is no prefex double dash
     ]
@@ -202,6 +236,19 @@ var defaults = (arg)=>{
             branches = mapper.branchesFn(curRemote, curBranch)
         }
     }
+    else if(arg === api.build){
+        // lightweight: resolve repo/branch only (branches are expanded lazily
+        // inside the release, so single-branch build stays fast and offline)
+        try{
+            curRemote = mapper.currentRemote()
+        }
+        catch(e){}
+
+        if(curRemote){
+            repo = mapper.repoFn(curRemote)
+            curBranch = mapper.currentBranch()
+        }
+    }
     switch(arg){
         case api.debug:
             return {
@@ -226,9 +273,12 @@ var defaults = (arg)=>{
             }
         case api.build: 
             return {
-                dir: repo? defaultDir(curBranch): cwd
+                dir: cwd
+                , base: repo? defaultDir(curBranch): cwd
                 , repo
                 , branch: curBranch
+                , start: curBranch
+                , remote: curRemote || 'origin'
             }
         
     }

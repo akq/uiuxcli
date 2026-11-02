@@ -2,6 +2,14 @@
 The command line of uiux
 
 # Release Notes
+## 1.1.1
+1. Add multi-branch builds with `--out`. Each branch gets its own output folder, with shared module references and a navigation page at the root.
+2. Add `--serve <port>` to preview build output over HTTP.
+3. Build the Webpack loader into the CLI and fix runtime generation during repeated builds.
+4. Automatically rebuild modules after manifest or package configuration changes and refresh browsers after successful updates.
+5. Serialize dev-server start/restart operations to avoid port conflicts.
+6. Fix copying public assets from each module's own directory.
+
 ## 1.1.0
 1. switch to @svgr/webpack
 2. debug.html rewrite
