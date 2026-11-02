@@ -139,11 +139,15 @@
             document.querySelector('#restart_' + id).disabled = false
         }
         function action(btn, id) {
-            var type = btn.textContent
+            var type = btn.textContent.trim().toLowerCase()
             btn.disabled = true
 
-            var pro = fetch('http://localhost:{{DEF_PORT}}_/action/' + type + '/' + id);
-            if (id === {{DEF_PORT}}) {
+            var pro = fetch('http://localhost:{{DEF_PORT}}/_/action/' + type + '/' + id)
+                .then(response => {
+                    if (!response.ok) throw new Error('Server action failed: HTTP ' + response.status)
+                    return response
+                });
+            if (String(id) === '{{DEF_PORT}}') {
                 setTimeout(x => window.close(), 1000)
             }
             else {
@@ -157,19 +161,21 @@
                         break
                     case 'start':
 
-                        fetch('http://localhost:' + id + '/remoteEntry.js').then(x => {
+                        return fetch('http://localhost:' + id + '/remoteEntry.js').then(x => {
+                            if (!x.ok) throw new Error('Can\'t start port ' + id + ': HTTP ' + x.status)
                             var span = new Date() - cur
                             start(id)
                             timer(id, span)
                         })
-                            .catch(x => alert('can\'t start port ' + id))
                             .finally(x => btn.disabled = false)
                         break
                     case 'restart':
                         document.querySelector('#toggle_' + id).disabled = true
                         timer(id)
-                        fetch('http://localhost:' + id + '/remoteEntry.js')
-                            .catch(x => alert('can\'t restart port ' + id))
+                        return fetch('http://localhost:' + id + '/remoteEntry.js')
+                            .then(x => {
+                                if (!x.ok) throw new Error('Can\'t restart port ' + id + ': HTTP ' + x.status)
+                            })
                             .finally(x => {
                                 var span = new Date() - cur
                                 timer(id, span)
@@ -179,6 +185,10 @@
                 }
             }).finally(x => {
                 if (type === 'stop') btn.disabled = false
+            }).catch(error => {
+                btn.disabled = false
+                if (type === 'restart') document.querySelector('#toggle_' + id).disabled = false
+                alert(error.message)
             })
         }
         }
@@ -191,20 +201,22 @@
     {{LIST_HTML}}
     </ul>
     <div id='time_sum'></div>
-    <!--ext-->
+    {{EXT_HTML}}
     <script>
         var links = document.querySelectorAll('a[port]')
         var cur2 = new Date()
         for (let a of links) {
+            let id = a.getAttribute('port')
             fetch(a.href).then(x => {
-                var tg = document.querySelector('#toggle_' + a.port)
+                if (!x.ok) throw new Error('HTTP ' + x.status)
+                var tg = document.querySelector('#toggle_' + id)
                 if (tg) tg.disabled = false
-                start(a.port)
+                start(id)
             }).catch(x => {
-                stop(a.port)
+                stop(id)
             }).finally(x => {
                 timer('sum', new Date() - cur2)
-                timer(a.port, new Date() - cur2)
+                timer(id, new Date() - cur2)
             })
         }
     </script>

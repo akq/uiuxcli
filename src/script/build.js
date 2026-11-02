@@ -5,6 +5,7 @@ var path = require('path')
 var fs = require('fs')
 var http = require('http')
 var watchConfig = require('./watch-config')
+var { gitUrlToHttps, getGitFileUrls } = require('./git-url')
 
 var {
     runCmd
@@ -95,18 +96,13 @@ var cmd = {
         // cfg0.mode = "production"
         var compiler = Webpack(cfg0)
         console.log('start to compile '+ name)
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             compiler.run((err, stats) => {
-                if (err) {
-                    console.log(JSON.stringify(err))
-                }
-                console.log( JSON.stringify(stats.toJson({ all: false, warnings: true, errors: true })))
+                if (stats) console.log(JSON.stringify(stats.toJson({ all: false, warnings: true, errors: true })))
                 compiler.close((closeErr) => {
-                    if(closeErr)
-                        console.log(name, 'compiled with error', closeErr)
-                    else{
-                        console.log(name, 'compiled successfully')
-                    }
+                    var error = err || closeErr || (stats?.hasErrors() && new Error(name + ' compilation failed'))
+                    if (error) return reject(error)
+                    console.log(name, 'compiled successfully')
                     resolve()
                 });
             })
@@ -425,7 +421,7 @@ function writeDebugHTML(dir, server, defPort, ext, servers) {
     var port = domainPorts
     var debugUrl = 'http://localhost:'+defPort+'/debug.html'
 
-    var repoUrl = mapper.repoFn()//runCmd(dir, 'git config --get remote.origin.url')
+    var repoUrl = gitUrlToHttps(mapper.repoFn())
 
 
     var headerHtml = `
@@ -441,11 +437,12 @@ function writeDebugHTML(dir, server, defPort, ext, servers) {
             var p = port[i][k]
             var {manifest: {origModules: module, name: domainName}, branch} = servers[p]
             var url = 'http://localhost:' + p
-            var clist = [], branchUrl
+            var clist = [], branchUrl = getGitFileUrls(repoUrl, branch).branchUrl
             for(var m in module){
-                var urls = getGitLabFileUrls(repoUrl, branch, module[m])
-                var blobUrl = urls.blobUrl + '.js'
-                if(!branchUrl) branchUrl = urls.branchUrl
+                var sourcePath = module[m]
+                if (sourcePath[0] === '.' && !path.extname(sourcePath)) sourcePath += '.js'
+                var urls = getGitFileUrls(repoUrl, branch, sourcePath)
+                var blobUrl = urls.blobUrl
                 if(module[m][0] !== '.') blobUrl = 'https://www.npmjs.com/package/'+ module[m]
                 clist.push(`<li>${domainName+'://'+path.basename(m)} => <a href='${blobUrl}' target='_blank'>${branch}: ${module[m]}</a></li>`)
             }
@@ -498,43 +495,6 @@ function writeDebugHTML(dir, server, defPort, ext, servers) {
     fs.writeFileSync(j(dir, 'public', 'debug.html'), content)
     // debugger
     server.openBrowser(debugUrl)
-}
-
-function getGitLabFileUrls(repoUrl, branch, filePath) {
-  // Normalize repo URL
-  repoUrl = repoUrl.replace(/\.git$/, '').replace(/\/$/, '');
-
-  // Clean up filePath
-  var cleanedPath = '';
-  if (filePath && filePath.trim()) {
-    cleanedPath = filePath
-      .replace(/^\.\/+/, '')   // Remove leading ./
-      .replace(/^\/+/, '')     // Remove leading /
-      .replace(/\/+$/, '')     // Remove trailing /
-      .trim();
-  }
-
-  // If no file path → branch homepage
-  if (!cleanedPath) {
-    var branchUrl = repoUrl + '/-/tree/' + branch;
-    return {
-      branchUrl: branchUrl,
-      blobUrl: null,
-      rawUrl: null
-    };
-  }
-
-  // Encode path parts
-  var encodedPath = cleanedPath
-    .split('/')
-    .map(function(part) { return encodeURIComponent(part); })
-    .join('/');
-
-  return {
-    branchUrl: repoUrl + '/-/tree/' + branch,
-    blobUrl: repoUrl + '/-/blob/' + branch + '/' + encodedPath,
-    rawUrl: repoUrl + '/-/raw/' + branch + '/' + encodedPath
-  };
 }
 
 //debug from release repo
@@ -708,7 +668,11 @@ async function coreDebug({ dir: base, repo, branches, port, pull = '', excludes=
 
 }
 async function releaseOne(opt){
-    if(opt.out){
+    if (opt.out && opt.target) throw new Error('Use either --out or --target, not both.')
+    if (opt.serve && opt.branches?.length && !opt.out && !opt.target) {
+        throw new Error('--serve with multiple branches requires --out or --target.')
+    }
+    if(opt.out || opt.target || opt.branches?.length){
         return coreAllRelease(opt)
     }
     var {mode, dir} = opt
@@ -718,8 +682,7 @@ async function releaseOne(opt){
         console.log('configuration is not generated')
         return
     }
-    if(mode && !['dev', 'develop', 'development'].includes(cfg.mode.toLowerCase())) 
-        cfg.mode = 'production'
+    if (mode) cfg.mode = ['dev', 'develop', 'development'].includes(mode.toLowerCase()) ? 'development' : 'production'
     await cmd.releaseSingle(cfg)
     if(opt.serve)
         serveStatic(cfg.output.path, opt.serve)
@@ -734,14 +697,14 @@ async function coreAllRelease(opt){
     var repo = opt.repo
     var pull = opt.pull || ''
     var mode = opt.mode
-    var out = opt.out
+    var out = opt.out || opt.target
     var excludes = opt.excludes || []
     var branches = (opt.branches && opt.branches.length)
         ? opt.branches.slice()
         : mapper.branchesFn(opt.remote || 'origin', opt.start || '.')
 
-    var outRoot = path.isAbsolute(out) ? out : j(base, out)
-    if(!fs.existsSync(outRoot))
+    var outRoot = out && (path.isAbsolute(out) ? out : opt.target ? path.resolve(opt.target) : j(base, out))
+    if(outRoot && !fs.existsSync(outRoot))
         fs.mkdirSync(outRoot, { recursive: true })
 
     var exc = excludes.reduce((a, c) => { a[c] = 1; return a }, {})
@@ -754,25 +717,27 @@ async function coreAllRelease(opt){
             branches.push(k.split('_').join('/'))
     }
 
+    branches = [...new Set(branches)]
     var built = []
     for(var i = 0; i < branches.length; i++){
         var x = branches[i]
         if(x === '+' || exc[x]) continue
         var cfg = getBranchCfg(x, base, repo, pull)
         if(!cfg) continue
-        if(mode && !['dev', 'develop', 'development'].includes((cfg.mode || '').toLowerCase()))
-            cfg.mode = 'production'
-        var outDir = j(outRoot, x)
+        if (mode) cfg.mode = ['dev', 'develop', 'development'].includes(mode.toLowerCase()) ? 'development' : 'production'
+        var outDir = outRoot ? j(outRoot, x) : cfg.output.path
         cfg.output = { ...cfg.output, path: outDir }
         built.push({ name: cfg.name, branch: x, outDir, src: j(base, x), pkg: readPkg(j(base, x)) })
         await cmd.releaseSingle(cfg)
     }
 
-    writeReleaseRefs(outRoot, built)
-    writeReleaseManifest(outRoot, built)
-    writeReleaseIndex(outRoot)
-    console.log('\nAll branches released under ' + outRoot)
-    if(opt.serve)
+    if (opt.out) {
+        writeReleaseRefs(outRoot, built)
+        writeReleaseManifest(outRoot, built)
+        writeReleaseIndex(outRoot)
+    }
+    console.log('\nAll branches released' + (outRoot ? ' under ' + outRoot : ''))
+    if(opt.serve && outRoot)
         serveStatic(outRoot, opt.serve)
 }
 function readPkg(dir){

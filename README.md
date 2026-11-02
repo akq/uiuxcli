@@ -9,6 +9,14 @@ The command line of uiux
 4. Automatically rebuild modules after manifest or package configuration changes and refresh browsers after successful updates.
 5. Serialize dev-server start/restart operations to avoid port conflicts.
 6. Fix copying public assets from each module's own directory.
+7. Support `build --target <folder>` for branch outputs without a navigation hub; `--branches` and `--excludes` also work without `--out`.
+8. Fix debug-page actions and HTTPS source links for SSH Git remotes.
+
+`build` without branch/output options still builds the current module.
+Use `--target` for `<folder>/<branch>` outputs, or `--out` to also generate
+shared references and the navigation page. These options cannot be combined.
+Omitting `--mode` retains development mode; `--mode production` enables
+production builds.
 
 ## 1.1.0
 1. switch to @svgr/webpack

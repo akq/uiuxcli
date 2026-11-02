@@ -110,6 +110,10 @@ var Services = {
                 , msg: 'output root for a multi-branch release. When set, build runs like dev but references modules by directory instead of port: every branch is emitted to <root>/<branch> and the root gets domain.js, ref.js, a manifest.json and an index.html navigation hub, e.g. .build'
                 , eg: ['.build']
             }
+            , target: {
+                v: 1
+                , msg: 'build branches into <target>/<branch> without generating a navigation hub; use --out for a complete site bundle'
+            }
             , serve: {
                 v: 1
                 , msg: 'after building, serve the output over http on the given port to verify the result (the output root is the web root), e.g. --serve 8123'
@@ -187,6 +191,8 @@ function help(status, arg) {
 
     }
     print()
+    print("Current Version:")
+    Fn.getVersion()
     print("Usage: " + cmd + " ["+api.join(' | ')+"] [--<options> <args>] [<dir>]")
     for(var i in Services){
         var opts = Services[i][1]
